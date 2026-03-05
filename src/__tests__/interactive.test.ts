@@ -100,7 +100,11 @@ describe('Interactive Mode', () => {
         mockInput.mockImplementation(() => Promise.resolve('test-project'));
         mockCheckbox.mockImplementation(() => Promise.resolve(['users']));
         // Default confirm sequence: subcollections=true, dryRun=true, merge=true, advancedOptions=false
-        mockConfirm.mockImplementation(() => Promise.resolve(true));
+        const defaultConfirmResponses = [true, true, true, false];
+        mockConfirm.mockImplementation(() => {
+            const next = defaultConfirmResponses.shift();
+            return Promise.resolve(next ?? false);
+        });
         mockSelect.mockImplementation(() => Promise.resolve('execute'));
         mockNumber.mockImplementation(() => Promise.resolve(undefined));
         mockInitializeApp.mockImplementation(() => mockApp);

@@ -266,11 +266,15 @@ async function validateTransformWithSamples(
 }
 
 function canWriteProgress(output: Output): boolean {
-    return !output.isQuiet && !output.isJson;
+    return !output.isQuiet && !output.isJson && process.stdout.isTTY === true;
 }
 
 function clearLine(): void {
-    process.stdout.write('\r' + ' '.repeat(SEPARATOR_LENGTH) + '\r');
+    if (!process.stdout.isTTY) return;
+    const width = typeof process.stdout.columns === 'number' && process.stdout.columns > 0
+        ? process.stdout.columns
+        : SEPARATOR_LENGTH;
+    process.stdout.write('\r' + ' '.repeat(width) + '\r');
 }
 
 function formatNameList(names: Set<string>, max: number = 8): string {
@@ -347,7 +351,9 @@ async function setupProgressTracking(
         }
 
         output.info(`\n   Total: ${totalDocs} documents to transfer\n`);
-        progressBar.start(totalDocs, stats);
+        if (canWriteProgress(output)) {
+            progressBar.start(totalDocs, stats);
+        }
     }
 
     return { totalDocs, progressBar };

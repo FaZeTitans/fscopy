@@ -115,6 +115,13 @@ export function parseIniConfig(content: string): Partial<Config> {
             idPrefix?: string;
             idSuffix?: string;
             webhook?: string;
+            retries?: string;
+            rateLimit?: string;
+            skipOversized?: string | boolean;
+            detectConflicts?: string | boolean;
+            maxDepth?: string;
+            verify?: string | boolean;
+            verifyIntegrity?: string | boolean;
         };
     };
 
@@ -149,6 +156,13 @@ export function parseIniConfig(content: string): Partial<Config> {
         idPrefix: parsed.options?.idPrefix ?? null,
         idSuffix: parsed.options?.idSuffix ?? null,
         webhook: parsed.options?.webhook ?? null,
+        retries: Number.parseInt(parsed.options?.retries ?? '', 10) || undefined,
+        rateLimit: Number.parseInt(parsed.options?.rateLimit ?? '', 10) || undefined,
+        skipOversized: parsed.options?.skipOversized !== undefined ? parseBoolean(parsed.options.skipOversized) : undefined,
+        detectConflicts: parsed.options?.detectConflicts !== undefined ? parseBoolean(parsed.options.detectConflicts) : undefined,
+        maxDepth: Number.parseInt(parsed.options?.maxDepth ?? '', 10) || undefined,
+        verify: parsed.options?.verify !== undefined ? parseBoolean(parsed.options.verify) : undefined,
+        verifyIntegrity: parsed.options?.verifyIntegrity !== undefined ? parseBoolean(parsed.options.verifyIntegrity) : undefined,
     };
 }
 
@@ -172,6 +186,13 @@ export function parseJsonConfig(content: string): Partial<Config> {
         idPrefix?: string;
         idSuffix?: string;
         webhook?: string;
+        retries?: number;
+        rateLimit?: number;
+        skipOversized?: boolean;
+        detectConflicts?: boolean;
+        maxDepth?: number;
+        verify?: boolean;
+        verifyIntegrity?: boolean;
     };
 
     return {
@@ -193,6 +214,13 @@ export function parseJsonConfig(content: string): Partial<Config> {
         idPrefix: config.idPrefix ?? null,
         idSuffix: config.idSuffix ?? null,
         webhook: config.webhook ?? null,
+        retries: config.retries,
+        rateLimit: config.rateLimit,
+        skipOversized: config.skipOversized,
+        detectConflicts: config.detectConflicts,
+        maxDepth: config.maxDepth,
+        verify: config.verify,
+        verifyIntegrity: config.verifyIntegrity,
     };
 }
 
@@ -232,7 +260,6 @@ export function mergeConfig(
         sourceProject:
             cliArgs.sourceProject ?? fileConfig.sourceProject ?? defaultConfig.sourceProject,
         destProject: cliArgs.destProject ?? fileConfig.destProject ?? defaultConfig.destProject,
-        retries: cliArgs.retries ?? defaultConfig.retries,
         where:
             cliWhereFilters.length > 0
                 ? cliWhereFilters
@@ -251,15 +278,16 @@ export function mergeConfig(
         idPrefix: cliArgs.idPrefix ?? fileConfig.idPrefix ?? defaultConfig.idPrefix,
         idSuffix: cliArgs.idSuffix ?? fileConfig.idSuffix ?? defaultConfig.idSuffix,
         webhook: cliArgs.webhook ?? fileConfig.webhook ?? defaultConfig.webhook,
+        retries: cliArgs.retries ?? fileConfig.retries ?? defaultConfig.retries,
         resume: cliArgs.resume ?? defaultConfig.resume,
         stateFile: cliArgs.stateFile ?? defaultConfig.stateFile,
-        verify: cliArgs.verify ?? defaultConfig.verify,
-        rateLimit: cliArgs.rateLimit ?? defaultConfig.rateLimit,
-        skipOversized: cliArgs.skipOversized ?? defaultConfig.skipOversized,
+        verify: cliArgs.verify ?? fileConfig.verify ?? defaultConfig.verify,
+        rateLimit: cliArgs.rateLimit ?? fileConfig.rateLimit ?? defaultConfig.rateLimit,
+        skipOversized: cliArgs.skipOversized ?? fileConfig.skipOversized ?? defaultConfig.skipOversized,
         json: cliArgs.json ?? defaultConfig.json,
         transformSamples: cliArgs.transformSamples ?? defaultConfig.transformSamples,
-        detectConflicts: cliArgs.detectConflicts ?? defaultConfig.detectConflicts,
-        maxDepth: cliArgs.maxDepth ?? defaultConfig.maxDepth,
-        verifyIntegrity: cliArgs.verifyIntegrity ?? defaultConfig.verifyIntegrity,
+        detectConflicts: cliArgs.detectConflicts ?? fileConfig.detectConflicts ?? defaultConfig.detectConflicts,
+        maxDepth: cliArgs.maxDepth ?? fileConfig.maxDepth ?? defaultConfig.maxDepth,
+        verifyIntegrity: cliArgs.verifyIntegrity ?? fileConfig.verifyIntegrity ?? defaultConfig.verifyIntegrity,
     };
 }

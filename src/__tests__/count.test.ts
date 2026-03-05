@@ -394,6 +394,157 @@ describe('count module', () => {
         });
     });
 
+    describe('maxDepth boundaries', () => {
+        test('maxDepth=0 means unlimited depth', () => {
+            const config = createMockConfig({ maxDepth: 0 });
+
+            const shouldStop = (depth: number) =>
+                config.maxDepth > 0 && depth >= config.maxDepth;
+
+            expect(shouldStop(0)).toBe(false);
+            expect(shouldStop(1)).toBe(false);
+            expect(shouldStop(5)).toBe(false);
+            expect(shouldStop(100)).toBe(false);
+        });
+
+        test('maxDepth=1 stops after first-level subcollections', () => {
+            const config = createMockConfig({ maxDepth: 1 });
+
+            const shouldStop = (depth: number) =>
+                config.maxDepth > 0 && depth >= config.maxDepth;
+
+            // depth=0 is root collection, should continue to find subcollections
+            expect(shouldStop(0)).toBe(false);
+            // depth=1 means we're already one level deep, should stop recursing
+            expect(shouldStop(1)).toBe(true);
+            expect(shouldStop(2)).toBe(true);
+        });
+
+        test('maxDepth=2 allows root + two levels of subcollections', () => {
+            const config = createMockConfig({ maxDepth: 2 });
+
+            const shouldStop = (depth: number) =>
+                config.maxDepth > 0 && depth >= config.maxDepth;
+
+            expect(shouldStop(0)).toBe(false);
+            expect(shouldStop(1)).toBe(false);
+            expect(shouldStop(2)).toBe(true);
+            expect(shouldStop(3)).toBe(true);
+        });
+
+        test('maxDepth limits recursive counting simulation', () => {
+            const config = createMockConfig({ maxDepth: 1, includeSubcollections: true });
+            const counted: string[] = [];
+
+            const simulateCount = (path: string, depth: number) => {
+                counted.push(path);
+                // Simulate subcollection discovery
+                const subcollections =
+                    path === 'users' ? ['orders', 'settings'] :
+                    path === 'users/doc1/orders' ? ['items'] : [];
+
+                for (const sub of subcollections) {
+                    if (config.maxDepth > 0 && depth >= config.maxDepth) continue;
+                    simulateCount(`${path}/doc1/${sub}`, depth + 1);
+                }
+            };
+
+            simulateCount('users', 0);
+
+            // With maxDepth=1: root(depth=0) counted, subcollections at depth=0 explored,
+            // but at depth=1 recursion stops (no items counted)
+            expect(counted).toEqual([
+                'users',
+                'users/doc1/orders',
+                'users/doc1/settings',
+            ]);
+            expect(counted).not.toContain('users/doc1/orders/doc1/items');
+        });
+    });
+
+    describe('onSubcollectionExcluded callback', () => {
+        test('invoked for each excluded subcollection', () => {
+            const config = createMockConfig({ exclude: ['logs', 'cache'] });
+            const excluded: string[] = [];
+            const onSubcollectionExcluded = (name: string) => excluded.push(name);
+
+            const subcollections = ['users', 'logs', 'orders', 'cache', 'products'];
+
+            for (const subId of subcollections) {
+                if (matchesExcludePattern(subId, config.exclude)) {
+                    onSubcollectionExcluded(subId);
+                    continue;
+                }
+            }
+
+            expect(excluded).toEqual(['logs', 'cache']);
+        });
+
+        test('invoked with wildcard exclude patterns', () => {
+            const config = createMockConfig({ exclude: ['cache*', '*_temp'] });
+            const excluded: string[] = [];
+            const onSubcollectionExcluded = (name: string) => excluded.push(name);
+
+            const subcollections = ['cache_v1', 'cache_prod', 'session_temp', 'orders', 'users'];
+
+            for (const subId of subcollections) {
+                if (matchesExcludePattern(subId, config.exclude)) {
+                    onSubcollectionExcluded(subId);
+                    continue;
+                }
+            }
+
+            expect(excluded).toEqual(['cache_v1', 'cache_prod', 'session_temp']);
+        });
+
+        test('not invoked when no subcollections are excluded', () => {
+            const config = createMockConfig({ exclude: ['nonexistent'] });
+            const excluded: string[] = [];
+            const onSubcollectionExcluded = (name: string) => excluded.push(name);
+
+            const subcollections = ['users', 'orders', 'products'];
+
+            for (const subId of subcollections) {
+                if (matchesExcludePattern(subId, config.exclude)) {
+                    onSubcollectionExcluded(subId);
+                    continue;
+                }
+            }
+
+            expect(excluded).toEqual([]);
+        });
+
+        test('not invoked when exclude list is empty', () => {
+            const config = createMockConfig({ exclude: [] });
+            const excluded: string[] = [];
+            const onSubcollectionExcluded = (name: string) => excluded.push(name);
+
+            const subcollections = ['users', 'orders'];
+
+            for (const subId of subcollections) {
+                if (matchesExcludePattern(subId, config.exclude)) {
+                    onSubcollectionExcluded(subId);
+                    continue;
+                }
+            }
+
+            expect(excluded).toEqual([]);
+        });
+
+        test('works as CountProgress callback', () => {
+            const excluded: string[] = [];
+            const progress: CountProgress = {
+                onSubcollectionExcluded: mock((name: string) => excluded.push(name)),
+            };
+
+            progress.onSubcollectionExcluded!('logs');
+            progress.onSubcollectionExcluded!('cache_v1');
+
+            expect(progress.onSubcollectionExcluded).toHaveBeenCalledTimes(2);
+            expect(excluded).toEqual(['logs', 'cache_v1']);
+        });
+    });
+
     describe('depth tracking', () => {
         test('depth increases with each subcollection level', () => {
             const paths = [

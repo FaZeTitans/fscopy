@@ -436,6 +436,136 @@ describe('transfer module', () => {
         });
     });
 
+    describe('pagination', () => {
+        test('pages through documents with batchSize as page size', () => {
+            const allDocs = Array.from({ length: 1250 }, (_, i) =>
+                createMockDoc(`doc${i}`, { index: i })
+            );
+            const batchSize = 500;
+            const pages: MockDocumentSnapshot[][] = [];
+            let offset = 0;
+
+            // Simulate pagination: fetch batchSize docs at a time
+            while (true) {
+                const page = allDocs.slice(offset, offset + batchSize);
+                if (page.length === 0) break;
+                pages.push(page);
+                offset += page.length;
+                if (page.length < batchSize) break;
+            }
+
+            expect(pages).toHaveLength(3);
+            expect(pages[0]).toHaveLength(500);
+            expect(pages[1]).toHaveLength(500);
+            expect(pages[2]).toHaveLength(250);
+        });
+
+        test('terminates when collection size is exact multiple of batchSize', () => {
+            const allDocs = Array.from({ length: 1000 }, (_, i) =>
+                createMockDoc(`doc${i}`, { index: i })
+            );
+            const batchSize = 500;
+            const pages: MockDocumentSnapshot[][] = [];
+            let offset = 0;
+
+            while (true) {
+                const page = allDocs.slice(offset, offset + batchSize);
+                if (page.length === 0) break;
+                pages.push(page);
+                offset += page.length;
+                // Fewer docs than requested means end (this won't trigger for exact multiple)
+                if (page.length < batchSize) break;
+            }
+
+            // With exact multiple, last page has batchSize docs, loop fetches one more empty page
+            // Total pages with data should be 2
+            expect(pages).toHaveLength(2);
+            expect(pages[0]).toHaveLength(500);
+            expect(pages[1]).toHaveLength(500);
+        });
+
+        test('respects user limit across pages', () => {
+            const allDocs = Array.from({ length: 1000 }, (_, i) =>
+                createMockDoc(`doc${i}`, { index: i })
+            );
+            const batchSize = 500;
+            const userLimit = 750;
+            const pages: MockDocumentSnapshot[][] = [];
+            let totalProcessed = 0;
+
+            while (true) {
+                let pageSize = batchSize;
+                const remaining = userLimit - totalProcessed;
+                if (remaining <= 0) break;
+                pageSize = Math.min(pageSize, remaining);
+
+                const page = allDocs.slice(totalProcessed, totalProcessed + pageSize);
+                if (page.length === 0) break;
+                pages.push(page);
+                totalProcessed += page.length;
+                if (page.length < pageSize) break;
+            }
+
+            expect(totalProcessed).toBe(750);
+            expect(pages).toHaveLength(2);
+            expect(pages[0]).toHaveLength(500);
+            expect(pages[1]).toHaveLength(250);
+        });
+
+        test('handles single page (docs < batchSize)', () => {
+            const allDocs = Array.from({ length: 100 }, (_, i) =>
+                createMockDoc(`doc${i}`, { index: i })
+            );
+            const batchSize = 500;
+            const pages: MockDocumentSnapshot[][] = [];
+            let offset = 0;
+
+            while (true) {
+                const page = allDocs.slice(offset, offset + batchSize);
+                if (page.length === 0) break;
+                pages.push(page);
+                offset += page.length;
+                if (page.length < batchSize) break;
+            }
+
+            expect(pages).toHaveLength(1);
+            expect(pages[0]).toHaveLength(100);
+        });
+
+        test('handles empty collection', () => {
+            const allDocs: MockDocumentSnapshot[] = [];
+            const batchSize = 500;
+            const pages: MockDocumentSnapshot[][] = [];
+
+            const page = allDocs.slice(0, batchSize);
+            if (page.length > 0) {
+                pages.push(page);
+            }
+
+            expect(pages).toHaveLength(0);
+        });
+
+        test('startAfter uses last doc of previous page', () => {
+            const allDocs = Array.from({ length: 10 }, (_, i) =>
+                createMockDoc(`doc${i}`, { index: i })
+            );
+            const batchSize = 3;
+            const lastDocs: string[] = [];
+            let offset = 0;
+
+            while (true) {
+                const page = allDocs.slice(offset, offset + batchSize);
+                if (page.length === 0) break;
+                lastDocs.push(page[page.length - 1].id);
+                offset += page.length;
+                if (page.length < batchSize) break;
+            }
+
+            // Last doc of each full page should be used as startAfter cursor
+            expect(lastDocs).toEqual(['doc2', 'doc5', 'doc8', 'doc9']);
+        });
+    });
+
     describe('batch operations', () => {
         test('batches documents by batchSize', () => {
             const docs = Array.from({ length: 1250 }, (_, i) =>

@@ -516,6 +516,30 @@ function configToIni(config: Config): string {
         ini += iniComment('webhook', 'https://hooks.slack.com/services/...');
     }
 
+    if (config.retries !== 3) {
+        ini += iniLine('retries', config.retries);
+    } else {
+        ini += iniComment('retries', 3);
+    }
+
+    if (config.rateLimit > 0) {
+        ini += iniLine('rateLimit', config.rateLimit);
+    } else {
+        ini += iniComment('rateLimit', 0);
+    }
+
+    ini += iniLine('skipOversized', config.skipOversized);
+    ini += iniLine('detectConflicts', config.detectConflicts);
+
+    if (config.maxDepth > 0) {
+        ini += iniLine('maxDepth', config.maxDepth);
+    } else {
+        ini += iniComment('maxDepth', 0);
+    }
+
+    ini += iniLine('verify', config.verify);
+    ini += iniLine('verifyIntegrity', config.verifyIntegrity);
+
     return ini;
 }
 
