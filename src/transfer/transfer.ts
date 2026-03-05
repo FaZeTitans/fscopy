@@ -101,7 +101,7 @@ async function checkForConflicts(
     return conflicts;
 }
 
-function buildTransferQuery(
+function buildBaseQuery(
     sourceDb: Firestore,
     collectionPath: string,
     config: Config,
@@ -115,10 +115,7 @@ function buildTransferQuery(
         }
     }
 
-    if (config.limit > 0 && depth === 0) {
-        query = query.limit(config.limit);
-    }
-
+    // Limit is handled via pagination in transferCollection
     return query;
 }
 
@@ -533,25 +530,50 @@ export async function transferCollection(
     const { sourceDb, config, stats, output } = ctx;
     const destCollectionPath = getDestCollectionPath(collectionPath, config.renameCollection);
 
-    const query = buildTransferQuery(sourceDb, collectionPath, config, depth);
+    const baseQuery = buildBaseQuery(sourceDb, collectionPath, config, depth);
+    const userLimit = config.limit > 0 && depth === 0 ? config.limit : 0;
 
-    const snapshot = await withRetry(() => query.get(), {
-        retries: config.retries,
-        onRetry: (attempt, max, err, delay) => {
-            output.logError(`Retry ${attempt}/${max} for ${collectionPath}`, {
-                error: err.message,
-                delay,
-            });
-        },
-    });
+    let totalProcessed = 0;
+    let lastDoc: QueryDocumentSnapshot | undefined;
 
-    if (snapshot.empty) return;
+    while (true) {
+        // Calculate page size respecting user limit
+        let pageSize = config.batchSize;
+        if (userLimit > 0) {
+            const remaining = userLimit - totalProcessed;
+            if (remaining <= 0) break;
+            pageSize = Math.min(pageSize, remaining);
+        }
 
-    stats.collectionsProcessed++;
-    output.logInfo(`Processing collection: ${collectionPath}`, { documents: snapshot.size });
+        // Build paginated query
+        let pageQuery = baseQuery.limit(pageSize);
+        if (lastDoc) {
+            pageQuery = pageQuery.startAfter(lastDoc);
+        }
 
-    for (let i = 0; i < snapshot.docs.length; i += config.batchSize) {
-        const batch = snapshot.docs.slice(i, i + config.batchSize);
-        await processBatch(batch, ctx, collectionPath, destCollectionPath, depth);
+        const snapshot = await withRetry(() => pageQuery.get(), {
+            retries: config.retries,
+            onRetry: (attempt, max, err, delay) => {
+                output.logError(`Retry ${attempt}/${max} for ${collectionPath}`, {
+                    error: err.message,
+                    delay,
+                });
+            },
+        });
+
+        if (snapshot.empty) break;
+
+        if (totalProcessed === 0) {
+            stats.collectionsProcessed++;
+            output.logInfo(`Processing collection: ${collectionPath}`);
+        }
+
+        await processBatch(snapshot.docs, ctx, collectionPath, destCollectionPath, depth);
+
+        totalProcessed += snapshot.docs.length;
+        lastDoc = snapshot.docs[snapshot.docs.length - 1];
+
+        // Fewer docs than requested means we've reached the end
+        if (snapshot.docs.length < pageSize) break;
     }
 }

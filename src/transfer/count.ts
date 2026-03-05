@@ -65,6 +65,9 @@ async function countSubcollectionsForDoc(
     depth: number,
     progress?: CountProgress
 ): Promise<number> {
+    // Respect maxDepth to match transfer behavior
+    if (config.maxDepth > 0 && depth >= config.maxDepth) return 0;
+
     let count = 0;
     const subcollections = await getSubcollections(doc.ref);
 
