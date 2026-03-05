@@ -250,7 +250,11 @@ async function main(): Promise<void> {
 
     // Run interactive mode if enabled
     if (argv.interactive) {
-        config = await runInteractiveMode(config);
+        const result = await runInteractiveMode(config);
+        config = result.config;
+        if (result.action === 'save') {
+            process.exit(0);
+        }
     }
 
     displayConfig(config);
