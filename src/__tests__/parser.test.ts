@@ -5,7 +5,10 @@ import {
     parseRenameMapping,
     parseStringList,
     parseBoolean,
+    mergeConfig,
 } from '../config/parser.js';
+import { defaults } from '../config/defaults.js';
+import type { CliArgs } from '../types.js';
 
 describe('parseBoolean', () => {
     test('returns true for boolean true', () => {
@@ -245,5 +248,58 @@ describe('parseRenameMapping', () => {
     test('ignores mappings with empty dest', () => {
         const result = parseRenameMapping(['users:']);
         expect(result).toEqual({});
+    });
+});
+
+describe('mergeConfig', () => {
+    test('file config values for merge/parallel/clear/deleteMissing are used when CLI does not specify them', () => {
+        const fileConfig = {
+            merge: true,
+            parallel: 4,
+            clear: true,
+            deleteMissing: true,
+        };
+        const cliArgs = {} as CliArgs;
+
+        const result = mergeConfig(defaults, fileConfig, cliArgs);
+
+        expect(result.merge).toBe(true);
+        expect(result.parallel).toBe(4);
+        expect(result.clear).toBe(true);
+        expect(result.deleteMissing).toBe(true);
+    });
+
+    test('CLI args override file config values', () => {
+        const fileConfig = {
+            merge: true,
+            parallel: 4,
+            clear: true,
+            deleteMissing: true,
+        };
+        const cliArgs = {
+            merge: false,
+            parallel: 2,
+            clear: false,
+            deleteMissing: false,
+        } as CliArgs;
+
+        const result = mergeConfig(defaults, fileConfig, cliArgs);
+
+        expect(result.merge).toBe(false);
+        expect(result.parallel).toBe(2);
+        expect(result.clear).toBe(false);
+        expect(result.deleteMissing).toBe(false);
+    });
+
+    test('defaults are used when neither CLI nor file config specify values', () => {
+        const fileConfig = {};
+        const cliArgs = {} as CliArgs;
+
+        const result = mergeConfig(defaults, fileConfig, cliArgs);
+
+        expect(result.merge).toBe(false);
+        expect(result.parallel).toBe(1);
+        expect(result.clear).toBe(false);
+        expect(result.deleteMissing).toBe(false);
     });
 });

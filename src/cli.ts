@@ -111,23 +111,19 @@ const argv = yargs(hideBin(process.argv))
         alias: 'm',
         type: 'boolean',
         description: 'Merge documents instead of overwriting',
-        default: false,
     })
     .option('parallel', {
         alias: 'p',
         type: 'number',
         description: 'Number of parallel collection transfers (default: 1)',
-        default: 1,
     })
     .option('clear', {
         type: 'boolean',
         description: 'Clear destination collections before transfer (DESTRUCTIVE)',
-        default: false,
     })
     .option('delete-missing', {
         type: 'boolean',
         description: 'Delete destination docs not present in source (sync mode)',
-        default: false,
     })
     .option('interactive', {
         alias: 'i',
