@@ -215,7 +215,18 @@ function processDocument(
     }
 
     const destDocId = getDestDocId(doc.id, config.idPrefix, config.idSuffix);
-    let docData = doc.data() as Record<string, unknown>;
+    let docData: Record<string, unknown>;
+    try {
+        docData = doc.data() as Record<string, unknown>;
+    } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        output.logError(`Failed to read document data for ${doc.id}`, {
+            collection: collectionPath,
+            error: errMsg,
+        });
+        stats.errors++;
+        return { skip: true, markCompleted: false };
+    }
 
     // Apply transform if provided
     if (transformFn) {

@@ -159,7 +159,7 @@ export async function runTransfer(config: ValidatedConfig, argv: CliArgs, output
         const { sourceDb, destDb } = initializeFirebase(config);
         await checkDatabaseConnectivity(sourceDb, destDb, config, output);
 
-        if (transformFn && config.dryRun && config.transformSamples !== 0) {
+        if (transformFn && config.transformSamples !== 0) {
             await validateTransformWithSamples(sourceDb, config, transformFn, output);
         }
 

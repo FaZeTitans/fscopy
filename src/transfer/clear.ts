@@ -3,6 +3,7 @@ import type { Config } from '../types.js';
 import type { Output } from '../utils/output.js';
 import { withRetry } from '../utils/retry.js';
 import { getFilteredSubcollections, getDestCollectionPath } from './helpers.js';
+import { CLEAR_PAGE_SIZE } from '../constants.js';
 
 async function clearDocSubcollections(
     db: Firestore,
@@ -58,22 +59,45 @@ export async function clearCollection(
     output: Output,
     includeSubcollections: boolean
 ): Promise<number> {
-    const snapshot = await db.collection(collectionPath).get();
-    if (snapshot.empty) return 0;
-
     let deletedCount = 0;
+    let lastDoc: QueryDocumentSnapshot | undefined;
+    const pageSize = Math.min(config.batchSize, CLEAR_PAGE_SIZE);
 
-    // Delete subcollections first if enabled
-    if (includeSubcollections) {
-        for (const doc of snapshot.docs) {
-            deletedCount += await clearDocSubcollections(db, doc, collectionPath, config, output);
+    // Paginate through the collection to avoid loading all docs into memory
+    while (true) {
+        let query = db.collection(collectionPath).limit(pageSize);
+        if (lastDoc) {
+            query = query.startAfter(lastDoc);
         }
-    }
 
-    // Delete documents in batches
-    for (let i = 0; i < snapshot.docs.length; i += config.batchSize) {
-        const batch = snapshot.docs.slice(i, i + config.batchSize);
-        deletedCount += await deleteBatch(db, batch, collectionPath, config, output);
+        const snapshot = await query.get();
+        if (snapshot.empty) break;
+
+        // Delete subcollections first if enabled
+        if (includeSubcollections) {
+            for (const doc of snapshot.docs) {
+                deletedCount += await clearDocSubcollections(
+                    db,
+                    doc,
+                    collectionPath,
+                    config,
+                    output
+                );
+            }
+        }
+
+        // Delete documents in batches
+        for (let i = 0; i < snapshot.docs.length; i += config.batchSize) {
+            const batch = snapshot.docs.slice(i, i + config.batchSize);
+            deletedCount += await deleteBatch(db, batch, collectionPath, config, output);
+        }
+
+        // In dry-run mode, we need to paginate using the last doc since docs aren't actually deleted
+        if (config.dryRun) {
+            lastDoc = snapshot.docs[snapshot.docs.length - 1];
+            if (snapshot.docs.length < pageSize) break;
+        }
+        // In live mode, docs are deleted so we always query from the start (no lastDoc needed)
     }
 
     return deletedCount;

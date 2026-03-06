@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { SEPARATOR_LENGTH } from '../constants.js';
 import type { Stats, LogEntry } from '../types.js';
 import { rotateFileIfNeeded } from './file-rotation.js';
@@ -62,6 +63,11 @@ export class Output {
 
     init(): void {
         if (this.options.logFile) {
+            // Ensure parent directory exists
+            const dir = path.dirname(this.options.logFile);
+            if (!fs.existsSync(dir)) {
+                fs.mkdirSync(dir, { recursive: true });
+            }
             this.rotateLogIfNeeded();
             const header = `# fscopy transfer log\n# Started: ${this.startTime.toISOString()}\n\n`;
             fs.writeFileSync(this.options.logFile, header);

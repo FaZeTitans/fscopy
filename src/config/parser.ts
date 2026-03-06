@@ -5,11 +5,15 @@ import type { Config, WhereFilter, CliArgs } from '../types.js';
 
 const SUPPORTED_EXTENSIONS = new Set(['.ini', '.json', '.cfg', '.conf']);
 
+function stderrWarn(message: string): void {
+    process.stderr.write(`${message}\n`);
+}
+
 export function getFileFormat(filePath: string): 'json' | 'ini' {
     const ext = path.extname(filePath).toLowerCase();
     if (ext === '.json') return 'json';
     if (ext && !SUPPORTED_EXTENSIONS.has(ext)) {
-        console.warn(`⚠️  Unrecognized config file extension "${ext}", parsing as INI format`);
+        stderrWarn(`⚠️  Unrecognized config file extension "${ext}", parsing as INI format`);
     }
     return 'ini';
 }
@@ -27,7 +31,7 @@ export function parseWhereFilter(filterStr: string): WhereFilter | null {
     const match = new RegExp(operatorRegex).exec(filterStr);
 
     if (!match) {
-        console.warn(`⚠️  Invalid where filter: "${filterStr}" (missing operator)`);
+        stderrWarn(`⚠️  Invalid where filter: "${filterStr}" (missing operator)`);
         return null;
     }
 
@@ -35,7 +39,7 @@ export function parseWhereFilter(filterStr: string): WhereFilter | null {
     const [fieldPart, valuePart] = filterStr.split(operatorRegex).filter((_, i) => i !== 1);
 
     if (!fieldPart || !valuePart) {
-        console.warn(`⚠️  Invalid where filter: "${filterStr}" (missing field or value)`);
+        stderrWarn(`⚠️  Invalid where filter: "${filterStr}" (missing field or value)`);
         return null;
     }
 
@@ -89,13 +93,13 @@ export function parseRenameMapping(
         const mapping = String(item).trim();
         const colonIndex = mapping.indexOf(':');
         if (colonIndex === -1) {
-            console.warn(`⚠️  Invalid rename mapping: "${mapping}" (missing ':')`);
+            stderrWarn(`⚠️  Invalid rename mapping: "${mapping}" (missing ':')`);
             continue;
         }
         const source = mapping.slice(0, colonIndex).trim();
         const dest = mapping.slice(colonIndex + 1).trim();
         if (!source || !dest) {
-            console.warn(`⚠️  Invalid rename mapping: "${mapping}" (empty source or dest)`);
+            stderrWarn(`⚠️  Invalid rename mapping: "${mapping}" (empty source or dest)`);
             continue;
         }
         result[source] = dest;
@@ -256,7 +260,7 @@ export function loadConfigFile(configPath?: string): Partial<Config> {
     const content = fs.readFileSync(absolutePath, 'utf-8');
     const format = getFileFormat(absolutePath);
 
-    console.log(`📄 Loaded config from: ${absolutePath} (${format.toUpperCase()})\n`);
+    process.stderr.write(`📄 Loaded config from: ${absolutePath} (${format.toUpperCase()})\n`);
 
     return format === 'json' ? parseJsonConfig(content) : parseIniConfig(content);
 }

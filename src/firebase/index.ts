@@ -72,6 +72,16 @@ export async function checkDatabaseConnectivity(
 }
 
 export async function cleanupFirebase(): Promise<void> {
-    if (sourceApp) await sourceApp.delete();
-    if (destApp) await destApp.delete();
+    try {
+        if (sourceApp) await sourceApp.delete();
+    } catch {
+        // Ignore cleanup errors - app may already be deleted
+    }
+    try {
+        if (destApp) await destApp.delete();
+    } catch {
+        // Ignore cleanup errors - app may already be deleted
+    }
+    sourceApp = null;
+    destApp = null;
 }

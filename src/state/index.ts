@@ -2,6 +2,10 @@ import fs from 'node:fs';
 import { STATE_SAVE_INTERVAL_MS, STATE_SAVE_BATCH_INTERVAL } from '../constants.js';
 import type { Config, ValidatedConfig, TransferState, Stats } from '../types.js';
 
+function stderrWarn(message: string): void {
+    process.stderr.write(`${message}\n`);
+}
+
 export const STATE_VERSION = 1;
 
 // =============================================================================
@@ -197,28 +201,28 @@ export function loadTransferState(stateFile: string): TransferState | null {
         try {
             state = JSON.parse(content) as TransferState;
         } catch {
-            console.error(`⚠️  State file is corrupted (invalid JSON): ${stateFile}`);
-            console.error('   Delete the file and restart, or run without --resume.');
+            stderrWarn(`⚠️  State file is corrupted (invalid JSON): ${stateFile}`);
+            stderrWarn('   Delete the file and restart, or run without --resume.');
             return null;
         }
 
         if (!state.version) {
-            console.error(`⚠️  State file is missing version field: ${stateFile}`);
-            console.error('   The file may be corrupted. Delete it and restart.');
+            stderrWarn(`⚠️  State file is missing version field: ${stateFile}`);
+            stderrWarn('   The file may be corrupted. Delete it and restart.');
             return null;
         }
 
         if (state.version !== STATE_VERSION) {
-            console.warn(
+            stderrWarn(
                 `⚠️  State file version mismatch (expected ${STATE_VERSION}, got ${state.version})`
             );
-            console.warn('   Delete the file and restart to use the current format.');
+            stderrWarn('   Delete the file and restart to use the current format.');
             return null;
         }
 
         return state;
     } catch (error) {
-        console.error(`⚠️  Failed to read state file: ${(error as Error).message}`);
+        stderrWarn(`⚠️  Failed to read state file: ${(error as Error).message}`);
         return null;
     }
 }
@@ -243,7 +247,7 @@ export function saveTransferState(stateFile: string, state: TransferState): void
             // Ignore cleanup errors
         }
         // Log but don't throw - state save failure shouldn't stop the transfer
-        console.error(`⚠️  Failed to save state file: ${(error as Error).message}`);
+        stderrWarn(`⚠️  Failed to save state file: ${(error as Error).message}`);
     }
 }
 
