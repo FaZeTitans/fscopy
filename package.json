@@ -13,7 +13,7 @@
         "test:integration": "firebase emulators:exec --only firestore --project fscopy-test 'FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 FSCOPY_SKIP_CREDENTIALS_CHECK=1 bun test src/__tests__/integration/'",
         "test:all": "bun run test && bun run test:integration",
         "test:watch": "bun test --watch",
-        "test:coverage": "bun test --coverage",
+        "test:coverage": "bun test --coverage src/__tests__/*.test.ts",
         "emulator": "firebase emulators:start --only firestore --project fscopy-test",
         "type-check": "tsc --noEmit",
         "lint": "eslint src/**/*.ts --no-warn-ignored",
