@@ -23,7 +23,8 @@ jobs:
         run: bun install
 
       - name: Security audit
-        run: bun pm audit 2>/dev/null || true
+        continue-on-error: true
+        run: bun pm audit
 
       - name: Type check
         run: bun run type-check

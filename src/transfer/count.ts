@@ -19,13 +19,14 @@ async function countWithSubcollections(
     progress?: CountProgress
 ): Promise<number> {
     const userLimit = depth === 0 && config.limit > 0 ? config.limit : 0;
-    let count = 0;
+    let rootCount = 0;
+    let subCount = 0;
     let lastDoc: QueryDocumentSnapshot | undefined;
 
     while (true) {
         let pageSize = CLEAR_PAGE_SIZE;
         if (userLimit > 0) {
-            const remaining = userLimit - count;
+            const remaining = userLimit - rootCount;
             if (remaining <= 0) break;
             pageSize = Math.min(pageSize, remaining);
         }
@@ -38,14 +39,14 @@ async function countWithSubcollections(
         const snapshot = await pageQuery.get();
         if (snapshot.empty) break;
 
-        count += snapshot.size;
+        rootCount += snapshot.size;
 
         if (depth === 0 && progress?.onCollection) {
-            progress.onCollection(collectionPath, count);
+            progress.onCollection(collectionPath, rootCount);
         }
 
         for (const doc of snapshot.docs) {
-            count += await countSubcollectionsForDoc(
+            subCount += await countSubcollectionsForDoc(
                 sourceDb,
                 doc,
                 collectionPath,
@@ -59,11 +60,11 @@ async function countWithSubcollections(
         if (snapshot.size < pageSize) break;
     }
 
-    if (count === 0 && depth === 0 && progress?.onCollection) {
+    if (rootCount === 0 && depth === 0 && progress?.onCollection) {
         progress.onCollection(collectionPath, 0);
     }
 
-    return count;
+    return rootCount + subCount;
 }
 
 async function countSubcollectionsForDoc(
