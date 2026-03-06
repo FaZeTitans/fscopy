@@ -49,8 +49,15 @@ describe('validateWebhookUrl', () => {
         expect(result.warning).toBeUndefined();
     });
 
-    test('warns for HTTP URLs (non-localhost)', () => {
+    test('rejects HTTP URLs by default', () => {
         const result = validateWebhookUrl('http://example.com/webhook');
+        expect(result.valid).toBe(false);
+        expect(result.warning).toContain('HTTP instead of HTTPS');
+        expect(result.warning).toContain('--allow-http-webhook');
+    });
+
+    test('allows HTTP URLs when allowHttp is true', () => {
+        const result = validateWebhookUrl('http://example.com/webhook', true);
         expect(result.valid).toBe(true);
         expect(result.warning).toContain('HTTP instead of HTTPS');
         expect(result.warning).toContain('unencrypted');

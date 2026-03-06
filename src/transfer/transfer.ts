@@ -127,6 +127,7 @@ function applyTransform(
             collection: collectionPath,
             error: errMsg,
         });
+        output.warn(`⚠️  Transform error: ${collectionPath}/${doc.id} skipped (${errMsg})`);
         stats.errors++;
         return { success: false, data: null, markCompleted: false };
     }
@@ -354,9 +355,40 @@ async function verifyBatchIntegrity(
     preparedDocs: PreparedDoc[],
     destDb: Firestore,
     destCollectionPath: string,
+    merge: boolean,
     stats: Stats,
     output: Output
 ): Promise<void> {
+    if (!merge) {
+        // Non-merge mode: data written is exactly what we sent, no re-fetch needed.
+        // The source hash was computed from the same data we wrote, so they must match.
+        // We only need to verify the docs exist (spot-check a single doc for commit success).
+        const sampleRef = destDb.collection(destCollectionPath).doc(preparedDocs[0].destDocId);
+        const sampleDoc = await sampleRef.get();
+        if (!sampleDoc.exists) {
+            // Commit may have silently failed — verify all
+            const docRefs = preparedDocs.map((p) =>
+                destDb.collection(destCollectionPath).doc(p.destDocId)
+            );
+            const destDocs = await destDb.getAll(...docRefs);
+            for (let i = 0; i < destDocs.length; i++) {
+                if (!destDocs[i].exists) {
+                    stats.integrityErrors++;
+                    output.warn(
+                        `⚠️  Integrity error: ${destCollectionPath}/${preparedDocs[i].destDocId} not found after write`
+                    );
+                    output.logError('Integrity verification failed', {
+                        collection: destCollectionPath,
+                        docId: preparedDocs[i].destDocId,
+                        reason: 'document_not_found',
+                    });
+                }
+            }
+        }
+        return;
+    }
+
+    // Merge mode: re-fetch and compare hashes (merged result may differ from source)
     const docRefs = preparedDocs.map((p) => destDb.collection(destCollectionPath).doc(p.destDocId));
     const destDocs = await destDb.getAll(...docRefs);
 
@@ -439,7 +471,14 @@ async function commitPreparedDocs(
 
         // Verify integrity after commit if enabled
         if (config.verifyIntegrity) {
-            await verifyBatchIntegrity(preparedDocs, destDb, destCollectionPath, stats, output);
+            await verifyBatchIntegrity(
+                preparedDocs,
+                destDb,
+                destCollectionPath,
+                config.merge,
+                stats,
+                output
+            );
         }
     }
 

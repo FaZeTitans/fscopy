@@ -277,8 +277,14 @@ export function createInitialState(config: ValidatedConfig): TransferState {
     };
 }
 
-export function validateStateForResume(state: TransferState, config: Config): string[] {
+export interface ResumeValidation {
+    errors: string[];
+    warnings: string[];
+}
+
+export function validateStateForResume(state: TransferState, config: Config): ResumeValidation {
     const errors: string[] = [];
+    const warnings: string[] = [];
 
     if (state.sourceProject !== config.sourceProject) {
         errors.push(
@@ -291,7 +297,7 @@ export function validateStateForResume(state: TransferState, config: Config): st
         );
     }
 
-    // Check if collections are compatible (state collections should be subset of config)
+    // Check if state collections are still in config
     const configCollections = new Set(config.collections);
     for (const col of state.collections) {
         if (!configCollections.has(col)) {
@@ -299,7 +305,18 @@ export function validateStateForResume(state: TransferState, config: Config): st
         }
     }
 
-    return errors;
+    // Check for orphaned completedDocs entries (subcollections or removed collections)
+    const stateCollections = new Set(state.collections);
+    for (const collectionPath of Object.keys(state.completedDocs)) {
+        const rootCollection = collectionPath.split('/')[0];
+        if (!configCollections.has(rootCollection) && !stateCollections.has(rootCollection)) {
+            warnings.push(
+                `State has completed docs for "${collectionPath}" which is no longer in config (will be ignored)`
+            );
+        }
+    }
+
+    return { errors, warnings };
 }
 
 export function isDocCompleted(

@@ -168,3 +168,4 @@ INI format uses `[projects]` section for source/dest and `[transfer]` section fo
 | Detect conflicts | `--detect-conflicts` | - | - | false |
 | Max depth | `--max-depth` | - | - | 0 (unlimited) |
 | Verify integrity | `--verify-integrity` | - | - | false |
+| Allow HTTP webhook | `--allow-http-webhook` | - | - | false |

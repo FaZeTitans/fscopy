@@ -77,6 +77,18 @@ export function validateConfig(config: Config): string[] {
         errors.push(...pathErrors);
     }
 
+    // Validate rename mapping names as valid Firestore IDs
+    for (const [source, dest] of Object.entries(config.renameCollection)) {
+        const sourceError = validateFirestoreId(source, 'collection');
+        if (sourceError) {
+            errors.push(`Invalid rename source "${source}": ${sourceError}`);
+        }
+        const destError = validateFirestoreId(dest, 'collection');
+        if (destError) {
+            errors.push(`Invalid rename destination "${dest}": ${destError}`);
+        }
+    }
+
     // Validate numeric bounds
     if (config.batchSize < 1 || config.batchSize > 500) {
         errors.push('Batch size must be between 1 and 500 (Firestore limit)');

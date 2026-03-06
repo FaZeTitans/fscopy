@@ -389,6 +389,7 @@ fscopy --init config.json
 | `--max-depth`              |       | number  | `0`                  | Max subcollection depth (0 = unlimited) |
 | `--detect-conflicts`       |       | boolean | `false`              | Detect concurrent modifications         |
 | `--verify-integrity`       |       | boolean | `false`              | Verify document integrity with hash     |
+| `--allow-http-webhook`     |       | boolean | `false`              | Allow HTTP (non-HTTPS) webhook URLs     |
 
 ## How It Works
 
@@ -402,7 +403,9 @@ fscopy --init config.json
 
 - **Transform files execute arbitrary code** - The `--transform` option uses dynamic imports to load and execute JavaScript/TypeScript files. Only use transform files you have written or thoroughly reviewed. Malicious transform files could access your filesystem, network, or credentials.
 
-- **Webhook URLs should use HTTPS** - fscopy warns if you use HTTP webhooks (except localhost). Webhook payloads contain project names and transfer statistics that could be sensitive.
+- **Webhook URLs must use HTTPS** - fscopy blocks HTTP webhooks by default (except localhost). Use `--allow-http-webhook` to explicitly allow unencrypted webhooks. Webhook payloads contain project names and transfer statistics that could be sensitive.
+
+- **Transform file extensions are validated** - Only `.ts`, `.js`, `.mjs`, and `.mts` files are accepted as transform files.
 
 - **Credentials via ADC** - fscopy uses Google Application Default Credentials. Ensure you're authenticated with the correct account before running transfers.
 
@@ -416,7 +419,15 @@ fscopy --init config.json
 - **Clear is destructive** - `--clear` deletes all destination docs before transfer
 - **Delete-missing syncs** - `--delete-missing` removes orphan docs after transfer
 - **Transform applies to all** - Transform function is applied to both root and subcollection docs
+- **Limit applies to root only** - `--limit` restricts the number of documents at the root collection level; subcollections are always copied in full
 - **Same project allowed** - Source and destination can be the same project when using `--rename-collection` or `--id-prefix`/`--id-suffix`
+
+## Environment Variables
+
+| Variable | Description |
+| -------- | ----------- |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Path to Google Cloud credentials JSON file |
+| `FSCOPY_SKIP_CREDENTIALS_CHECK` | Set to `1` to skip the credentials check at startup (useful in CI/CD with alternative auth) |
 
 ## Limitations
 

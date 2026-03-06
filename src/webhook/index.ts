@@ -22,12 +22,21 @@ export function detectWebhookType(url: string): 'slack' | 'discord' | 'custom' {
     return 'custom';
 }
 
-export function validateWebhookUrl(url: string): { valid: boolean; warning?: string } {
+export function validateWebhookUrl(
+    url: string,
+    allowHttp: boolean = false
+): { valid: boolean; warning?: string } {
     try {
         const parsed = new URL(url);
         const isLocalhost = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
 
         if (parsed.protocol !== 'https:' && !isLocalhost) {
+            if (!allowHttp) {
+                return {
+                    valid: false,
+                    warning: `Webhook URL uses HTTP instead of HTTPS. Use --allow-http-webhook to allow unencrypted webhooks.`,
+                };
+            }
             return {
                 valid: true,
                 warning: `Webhook URL uses HTTP instead of HTTPS. Data will be sent unencrypted.`,

@@ -326,6 +326,7 @@ export function mergeConfig(
     merged.stateFile = cliArgs.stateFile ?? defaultConfig.stateFile;
     merged.json = cliArgs.json ?? defaultConfig.json;
     merged.transformSamples = cliArgs.transformSamples ?? defaultConfig.transformSamples;
+    merged.allowHttpWebhook = cliArgs.allowHttpWebhook ?? defaultConfig.allowHttpWebhook;
 
     return merged as unknown as Config;
 }

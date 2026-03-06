@@ -32,9 +32,12 @@ function initializeResumeMode(config: ValidatedConfig, output: Output): ResumeRe
             throw new Error(`No state file found at ${config.stateFile}. Cannot resume without a saved state. Run without --resume to start fresh.`);
         }
 
-        const stateErrors = validateStateForResume(existingState, config);
+        const { errors: stateErrors, warnings: stateWarnings } = validateStateForResume(existingState, config);
         if (stateErrors.length > 0) {
             throw new Error(`Cannot resume: state file incompatible with current config:\n   - ${stateErrors.join('\n   - ')}`);
+        }
+        for (const warning of stateWarnings) {
+            output.warn(`⚠️  ${warning}`);
         }
 
         const completedCount = Object.values(existingState.completedDocs).reduce((sum, ids) => sum + ids.length, 0);

@@ -85,6 +85,7 @@ function createMockConfig(overrides: Partial<Config> = {}): Config {
         detectConflicts: false,
         maxDepth: 0,
         verifyIntegrity: false,
+        allowHttpWebhook: false,
         resume: false,
         stateFile: '.fscopy-state.json',
         verify: false,

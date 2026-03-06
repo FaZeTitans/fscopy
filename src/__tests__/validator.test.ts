@@ -38,6 +38,7 @@ function createConfig(overrides: Partial<Config> = {}): Config {
         detectConflicts: false,
         maxDepth: 0,
         verifyIntegrity: false,
+        allowHttpWebhook: false,
         ...overrides,
     };
 }
@@ -251,6 +252,33 @@ describe('validateConfig', () => {
         const config = createConfig({ limit: 0 });
         const errors = validateConfig(config);
         expect(errors.some((e) => e.includes('Document limit'))).toBe(false);
+    });
+
+    // Rename mapping validation
+    test('returns error for reserved rename destination', () => {
+        const config = createConfig({
+            renameCollection: { users: '__reserved__' },
+        });
+        const errors = validateConfig(config);
+        expect(errors.some((e) => e.includes('rename destination'))).toBe(true);
+    });
+
+    test('returns error for reserved rename source', () => {
+        const config = createConfig({
+            renameCollection: { __bad__: 'good' },
+        });
+        const errors = validateConfig(config);
+        expect(errors.some((e) => e.includes('rename source'))).toBe(true);
+    });
+
+    test('allows valid rename mappings', () => {
+        const config = createConfig({
+            sourceProject: 'a',
+            destProject: 'b',
+            renameCollection: { users: 'users_backup' },
+        });
+        const errors = validateConfig(config);
+        expect(errors.some((e) => e.includes('rename'))).toBe(false);
     });
 });
 

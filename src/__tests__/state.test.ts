@@ -246,35 +246,54 @@ describe('State Management', () => {
         };
 
         test('returns no errors for compatible state', () => {
-            const errors = validateStateForResume(baseState, baseConfig);
+            const { errors } = validateStateForResume(baseState, baseConfig);
             expect(errors).toEqual([]);
         });
 
         test('returns error for source project mismatch', () => {
             const state = { ...baseState, sourceProject: 'different' };
-            const errors = validateStateForResume(state, baseConfig);
+            const { errors } = validateStateForResume(state, baseConfig);
             expect(errors).toHaveLength(1);
             expect(errors[0]).toContain('Source project mismatch');
         });
 
         test('returns error for dest project mismatch', () => {
             const state = { ...baseState, destProject: 'different' };
-            const errors = validateStateForResume(state, baseConfig);
+            const { errors } = validateStateForResume(state, baseConfig);
             expect(errors).toHaveLength(1);
             expect(errors[0]).toContain('Destination project mismatch');
         });
 
         test('returns error for collection not in config', () => {
             const state = { ...baseState, collections: ['users', 'unknown'] };
-            const errors = validateStateForResume(state, baseConfig);
+            const { errors } = validateStateForResume(state, baseConfig);
             expect(errors).toHaveLength(1);
             expect(errors[0]).toContain('unknown');
         });
 
         test('returns multiple errors', () => {
             const state = { ...baseState, sourceProject: 'x', destProject: 'y' };
-            const errors = validateStateForResume(state, baseConfig);
+            const { errors } = validateStateForResume(state, baseConfig);
             expect(errors).toHaveLength(2);
+        });
+
+        test('warns about orphaned completedDocs entries', () => {
+            const state = {
+                ...baseState,
+                completedDocs: {
+                    users: ['doc1'],
+                    removed_collection: ['doc2'],
+                },
+            };
+            const config = {
+                ...baseConfig,
+                collections: ['users'],
+            } as Config;
+            const { errors, warnings } = validateStateForResume(state, config);
+            expect(errors).toHaveLength(0);
+            expect(warnings).toHaveLength(1);
+            expect(warnings[0]).toContain('removed_collection');
+            expect(warnings[0]).toContain('ignored');
         });
     });
 

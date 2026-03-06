@@ -27,6 +27,32 @@ describe('Transform Loader', () => {
             }
         });
 
+        test('throws error for unsupported file extension', async () => {
+            const transformPath = path.join(tempDir, 'transform.json');
+            fs.writeFileSync(transformPath, '{}');
+
+            try {
+                await loadTransformFunction(transformPath);
+                expect.unreachable('Should have thrown');
+            } catch (error) {
+                expect((error as Error).message).toContain(
+                    'must be a JavaScript or TypeScript file'
+                );
+            }
+        });
+
+        test('throws error for file without extension', async () => {
+            const transformPath = path.join(tempDir, 'transform');
+            fs.writeFileSync(transformPath, 'export default (doc) => doc;');
+
+            try {
+                await loadTransformFunction(transformPath);
+                expect.unreachable('Should have thrown');
+            } catch (error) {
+                expect((error as Error).message).toContain('no extension');
+            }
+        });
+
         test('loads default export function', async () => {
             const transformPath = path.join(tempDir, 'transform-default.ts');
             fs.writeFileSync(
