@@ -22,11 +22,44 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Security audit
+        continue-on-error: true
+        run: bun pm audit
+
       - name: Type check
         run: bun run type-check
 
       - name: Lint
         run: bun run lint
 
-      - name: Test
-        run: bun test
+      - name: Format check
+        run: bun run format:check
+
+      - name: Unit Tests
+        run: bun run test
+
+      - name: Coverage
+        run: bun run test:coverage
+
+  integration-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Java (for Firebase Emulator)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Integration Tests
+        run: bun run test:integration

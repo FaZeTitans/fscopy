@@ -1,5 +1,11 @@
 import type { Stats } from '../types.js';
 import type { Output } from '../utils/output.js';
+import {
+    WEBHOOK_TIMEOUT_MS,
+    WEBHOOK_MAX_PAYLOAD_BYTES,
+    WEBHOOK_MAX_RETRIES,
+    WEBHOOK_RETRY_DELAY_MS,
+} from '../constants.js';
 
 export interface WebhookPayload {
     source: string;
@@ -22,12 +28,21 @@ export function detectWebhookType(url: string): 'slack' | 'discord' | 'custom' {
     return 'custom';
 }
 
-export function validateWebhookUrl(url: string): { valid: boolean; warning?: string } {
+export function validateWebhookUrl(
+    url: string,
+    allowHttp: boolean = false
+): { valid: boolean; warning?: string } {
     try {
         const parsed = new URL(url);
         const isLocalhost = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
 
         if (parsed.protocol !== 'https:' && !isLocalhost) {
+            if (!allowHttp) {
+                return {
+                    valid: false,
+                    warning: `Webhook URL uses HTTP instead of HTTPS. Use --allow-http-webhook to allow unencrypted webhooks.`,
+                };
+            }
             return {
                 valid: true,
                 warning: `Webhook URL uses HTTP instead of HTTPS. Data will be sent unencrypted.`,
@@ -105,11 +120,64 @@ export function formatDiscordPayload(payload: WebhookPayload): Record<string, un
     };
 }
 
+async function attemptWebhookSend(
+    webhookUrl: string,
+    bodyJson: string,
+    output: Output
+): Promise<boolean> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
+
+    try {
+        const response = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: bodyJson,
+            signal: controller.signal,
+        });
+
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            const statusCode = response.status;
+
+            if (statusCode >= 400 && statusCode < 500) {
+                output.logError(`Webhook client error (${statusCode})`, {
+                    url: webhookUrl,
+                    status: statusCode,
+                    error: errorText,
+                });
+                output.warn(
+                    `⚠️  Webhook failed (HTTP ${statusCode}): Check webhook URL or payload format`
+                );
+                // Client errors are not retryable
+                return false;
+            }
+
+            if (statusCode >= 500) {
+                output.logError(`Webhook server error (${statusCode})`, {
+                    url: webhookUrl,
+                    status: statusCode,
+                    error: errorText,
+                });
+                throw new Error(`Server error (HTTP ${statusCode})`);
+            }
+
+            return false;
+        }
+
+        return true;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
 export async function sendWebhook(
     webhookUrl: string,
     payload: WebhookPayload,
     output: Output
-): Promise<void> {
+): Promise<boolean> {
     const webhookType = detectWebhookType(webhookUrl);
 
     let body: Record<string, unknown>;
@@ -121,66 +189,81 @@ export async function sendWebhook(
             body = formatDiscordPayload(payload);
             break;
         default:
-            body = payload as unknown as Record<string, unknown>;
+            body = { ...payload };
     }
 
-    try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 30000);
+    const bodyJson = JSON.stringify(body);
 
-        const response = await fetch(webhookUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-            signal: controller.signal,
+    // Validate payload size
+    const payloadSize = new TextEncoder().encode(bodyJson).length;
+    if (payloadSize > WEBHOOK_MAX_PAYLOAD_BYTES) {
+        output.logError('Webhook payload too large', {
+            url: webhookUrl,
+            size: payloadSize,
+            limit: WEBHOOK_MAX_PAYLOAD_BYTES,
         });
+        output.warn(
+            `⚠️  Webhook payload too large (${Math.round(payloadSize / 1024)}KB > ${Math.round(WEBHOOK_MAX_PAYLOAD_BYTES / 1024)}KB limit)`
+        );
+        return false;
+    }
 
-        clearTimeout(timeout);
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            const statusCode = response.status;
-
-            if (statusCode >= 400 && statusCode < 500) {
-                // Client error - likely bad URL or payload format
-                output.logError(`Webhook client error (${statusCode})`, {
-                    url: webhookUrl,
-                    status: statusCode,
-                    error: errorText,
-                });
-                output.warn(
-                    `⚠️  Webhook failed (HTTP ${statusCode}): Check webhook URL or payload format`
-                );
-            } else if (statusCode >= 500) {
-                // Server error - retry might help
-                output.logError(`Webhook server error (${statusCode})`, {
-                    url: webhookUrl,
-                    status: statusCode,
-                    error: errorText,
-                });
-                output.warn(
-                    `⚠️  Webhook server error (HTTP ${statusCode}): The webhook service may be temporarily unavailable`
-                );
+    // Retry loop for server errors and network failures
+    for (let attempt = 0; attempt <= WEBHOOK_MAX_RETRIES; attempt++) {
+        try {
+            const success = await attemptWebhookSend(webhookUrl, bodyJson, output);
+            if (success) {
+                output.logInfo(`Webhook sent successfully (${webhookType})`, { url: webhookUrl });
+                output.info(`📤 Webhook notification sent (${webhookType})`);
+                return true;
             }
-            return;
-        }
+            // Client error (4xx) - don't retry
+            return false;
+        } catch (error) {
+            const err = error as Error;
+            const isLastAttempt = attempt === WEBHOOK_MAX_RETRIES;
 
-        output.logInfo(`Webhook sent successfully (${webhookType})`, { url: webhookUrl });
-        output.info(`📤 Webhook notification sent (${webhookType})`);
-    } catch (error) {
-        const err = error as Error;
+            if (err.name === 'AbortError') {
+                output.logError(`Webhook timeout after ${WEBHOOK_TIMEOUT_MS / 1000}s`, {
+                    url: webhookUrl,
+                    attempt: attempt + 1,
+                });
+                if (isLastAttempt) {
+                    output.warn(
+                        `⚠️  Webhook request timed out after ${WEBHOOK_TIMEOUT_MS / 1000} seconds`
+                    );
+                    return false;
+                }
+            } else if (err.message.includes('ECONNREFUSED') || err.message.includes('ENOTFOUND')) {
+                output.logError(`Webhook connection failed: ${err.message}`, {
+                    url: webhookUrl,
+                    attempt: attempt + 1,
+                });
+                if (isLastAttempt) {
+                    output.warn(
+                        `⚠️  Webhook connection failed: Unable to reach ${new URL(webhookUrl).hostname}`
+                    );
+                    return false;
+                }
+            } else {
+                output.logError(`Failed to send webhook: ${err.message}`, {
+                    url: webhookUrl,
+                    attempt: attempt + 1,
+                });
+                if (isLastAttempt) {
+                    output.warn(`⚠️  Failed to send webhook: ${err.message}`);
+                    return false;
+                }
+            }
 
-        if (err.name === 'AbortError') {
-            output.logError('Webhook timeout after 30s', { url: webhookUrl });
-            output.warn('⚠️  Webhook request timed out after 30 seconds');
-        } else if (err.message.includes('ECONNREFUSED') || err.message.includes('ENOTFOUND')) {
-            output.logError(`Webhook connection failed: ${err.message}`, { url: webhookUrl });
-            output.warn(
-                `⚠️  Webhook connection failed: Unable to reach ${new URL(webhookUrl).hostname}`
-            );
-        } else {
-            output.logError(`Failed to send webhook: ${err.message}`, { url: webhookUrl });
-            output.warn(`⚠️  Failed to send webhook: ${err.message}`);
+            // Wait before retrying
+            const delay = WEBHOOK_RETRY_DELAY_MS * Math.pow(2, attempt);
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            output.logInfo(`Retrying webhook (attempt ${attempt + 2}/${WEBHOOK_MAX_RETRIES + 1})`, {
+                url: webhookUrl,
+            });
         }
     }
+
+    return false;
 }

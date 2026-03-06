@@ -2,6 +2,10 @@ import fs from 'node:fs';
 import { STATE_SAVE_INTERVAL_MS, STATE_SAVE_BATCH_INTERVAL } from '../constants.js';
 import type { Config, ValidatedConfig, TransferState, Stats } from '../types.js';
 
+function stderrWarn(message: string): void {
+    process.stderr.write(`${message}\n`);
+}
+
 export const STATE_VERSION = 1;
 
 // =============================================================================
@@ -192,18 +196,33 @@ export function loadTransferState(stateFile: string): TransferState | null {
             return null;
         }
         const content = fs.readFileSync(stateFile, 'utf-8');
-        const state = JSON.parse(content) as TransferState;
+
+        let state: TransferState;
+        try {
+            state = JSON.parse(content) as TransferState;
+        } catch {
+            stderrWarn(`⚠️  State file is corrupted (invalid JSON): ${stateFile}`);
+            stderrWarn('   Delete the file and restart, or run without --resume.');
+            return null;
+        }
+
+        if (!state.version) {
+            stderrWarn(`⚠️  State file is missing version field: ${stateFile}`);
+            stderrWarn('   The file may be corrupted. Delete it and restart.');
+            return null;
+        }
 
         if (state.version !== STATE_VERSION) {
-            console.warn(
+            stderrWarn(
                 `⚠️  State file version mismatch (expected ${STATE_VERSION}, got ${state.version})`
             );
+            stderrWarn('   Delete the file and restart to use the current format.');
             return null;
         }
 
         return state;
     } catch (error) {
-        console.error(`⚠️  Failed to load state file: ${(error as Error).message}`);
+        stderrWarn(`⚠️  Failed to read state file: ${(error as Error).message}`);
         return null;
     }
 }
@@ -228,7 +247,7 @@ export function saveTransferState(stateFile: string, state: TransferState): void
             // Ignore cleanup errors
         }
         // Log but don't throw - state save failure shouldn't stop the transfer
-        console.error(`⚠️  Failed to save state file: ${(error as Error).message}`);
+        stderrWarn(`⚠️  Failed to save state file: ${(error as Error).message}`);
     }
 }
 
@@ -262,8 +281,14 @@ export function createInitialState(config: ValidatedConfig): TransferState {
     };
 }
 
-export function validateStateForResume(state: TransferState, config: Config): string[] {
+export interface ResumeValidation {
+    errors: string[];
+    warnings: string[];
+}
+
+export function validateStateForResume(state: TransferState, config: Config): ResumeValidation {
     const errors: string[] = [];
+    const warnings: string[] = [];
 
     if (state.sourceProject !== config.sourceProject) {
         errors.push(
@@ -276,7 +301,7 @@ export function validateStateForResume(state: TransferState, config: Config): st
         );
     }
 
-    // Check if collections are compatible (state collections should be subset of config)
+    // Check if state collections are still in config
     const configCollections = new Set(config.collections);
     for (const col of state.collections) {
         if (!configCollections.has(col)) {
@@ -284,25 +309,16 @@ export function validateStateForResume(state: TransferState, config: Config): st
         }
     }
 
-    return errors;
-}
-
-export function isDocCompleted(
-    state: TransferState,
-    collectionPath: string,
-    docId: string
-): boolean {
-    const completedInCollection = state.completedDocs[collectionPath];
-    return completedInCollection ? completedInCollection.includes(docId) : false;
-}
-
-export function markDocCompleted(
-    state: TransferState,
-    collectionPath: string,
-    docId: string
-): void {
-    if (!state.completedDocs[collectionPath]) {
-        state.completedDocs[collectionPath] = [];
+    // Check for orphaned completedDocs entries (subcollections or removed collections)
+    const stateCollections = new Set(state.collections);
+    for (const collectionPath of Object.keys(state.completedDocs)) {
+        const rootCollection = collectionPath.split('/')[0];
+        if (!configCollections.has(rootCollection) && !stateCollections.has(rootCollection)) {
+            warnings.push(
+                `State has completed docs for "${collectionPath}" which is no longer in config (will be ignored)`
+            );
+        }
     }
-    state.completedDocs[collectionPath].push(docId);
+
+    return { errors, warnings };
 }

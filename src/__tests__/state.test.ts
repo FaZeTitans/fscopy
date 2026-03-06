@@ -8,8 +8,6 @@ import {
     deleteTransferState,
     createInitialState,
     validateStateForResume,
-    isDocCompleted,
-    markDocCompleted,
     STATE_VERSION,
     StateSaver,
     CompletedDocsCache,
@@ -246,153 +244,54 @@ describe('State Management', () => {
         };
 
         test('returns no errors for compatible state', () => {
-            const errors = validateStateForResume(baseState, baseConfig);
+            const { errors } = validateStateForResume(baseState, baseConfig);
             expect(errors).toEqual([]);
         });
 
         test('returns error for source project mismatch', () => {
             const state = { ...baseState, sourceProject: 'different' };
-            const errors = validateStateForResume(state, baseConfig);
+            const { errors } = validateStateForResume(state, baseConfig);
             expect(errors).toHaveLength(1);
             expect(errors[0]).toContain('Source project mismatch');
         });
 
         test('returns error for dest project mismatch', () => {
             const state = { ...baseState, destProject: 'different' };
-            const errors = validateStateForResume(state, baseConfig);
+            const { errors } = validateStateForResume(state, baseConfig);
             expect(errors).toHaveLength(1);
             expect(errors[0]).toContain('Destination project mismatch');
         });
 
         test('returns error for collection not in config', () => {
             const state = { ...baseState, collections: ['users', 'unknown'] };
-            const errors = validateStateForResume(state, baseConfig);
+            const { errors } = validateStateForResume(state, baseConfig);
             expect(errors).toHaveLength(1);
             expect(errors[0]).toContain('unknown');
         });
 
         test('returns multiple errors', () => {
             const state = { ...baseState, sourceProject: 'x', destProject: 'y' };
-            const errors = validateStateForResume(state, baseConfig);
+            const { errors } = validateStateForResume(state, baseConfig);
             expect(errors).toHaveLength(2);
         });
-    });
 
-    describe('isDocCompleted', () => {
-        test('returns false for empty completedDocs', () => {
-            const state: TransferState = {
-                version: STATE_VERSION,
-                sourceProject: '',
-                destProject: '',
-                collections: [],
-                startedAt: '',
-                updatedAt: '',
-                completedDocs: {},
-                stats: {
-                    collectionsProcessed: 0,
-                    documentsTransferred: 0,
-                    documentsDeleted: 0,
-                    errors: 0,
-                    conflicts: 0,
-                    integrityErrors: 0,
+        test('warns about orphaned completedDocs entries', () => {
+            const state = {
+                ...baseState,
+                completedDocs: {
+                    users: ['doc1'],
+                    removed_collection: ['doc2'],
                 },
             };
-
-            expect(isDocCompleted(state, 'users', 'doc1')).toBe(false);
-        });
-
-        test('returns false for doc not in collection', () => {
-            const state: TransferState = {
-                version: STATE_VERSION,
-                sourceProject: '',
-                destProject: '',
-                collections: [],
-                startedAt: '',
-                updatedAt: '',
-                completedDocs: { users: ['doc1', 'doc2'] },
-                stats: {
-                    collectionsProcessed: 0,
-                    documentsTransferred: 0,
-                    documentsDeleted: 0,
-                    errors: 0,
-                    conflicts: 0,
-                    integrityErrors: 0,
-                },
-            };
-
-            expect(isDocCompleted(state, 'users', 'doc3')).toBe(false);
-        });
-
-        test('returns true for completed doc', () => {
-            const state: TransferState = {
-                version: STATE_VERSION,
-                sourceProject: '',
-                destProject: '',
-                collections: [],
-                startedAt: '',
-                updatedAt: '',
-                completedDocs: { users: ['doc1', 'doc2'] },
-                stats: {
-                    collectionsProcessed: 0,
-                    documentsTransferred: 0,
-                    documentsDeleted: 0,
-                    errors: 0,
-                    conflicts: 0,
-                    integrityErrors: 0,
-                },
-            };
-
-            expect(isDocCompleted(state, 'users', 'doc1')).toBe(true);
-        });
-    });
-
-    describe('markDocCompleted', () => {
-        test('creates collection array if not exists', () => {
-            const state: TransferState = {
-                version: STATE_VERSION,
-                sourceProject: '',
-                destProject: '',
-                collections: [],
-                startedAt: '',
-                updatedAt: '',
-                completedDocs: {},
-                stats: {
-                    collectionsProcessed: 0,
-                    documentsTransferred: 0,
-                    documentsDeleted: 0,
-                    errors: 0,
-                    conflicts: 0,
-                    integrityErrors: 0,
-                },
-            };
-
-            markDocCompleted(state, 'users', 'doc1');
-
-            expect(state.completedDocs.users).toEqual(['doc1']);
-        });
-
-        test('appends to existing collection array', () => {
-            const state: TransferState = {
-                version: STATE_VERSION,
-                sourceProject: '',
-                destProject: '',
-                collections: [],
-                startedAt: '',
-                updatedAt: '',
-                completedDocs: { users: ['doc1'] },
-                stats: {
-                    collectionsProcessed: 0,
-                    documentsTransferred: 0,
-                    documentsDeleted: 0,
-                    errors: 0,
-                    conflicts: 0,
-                    integrityErrors: 0,
-                },
-            };
-
-            markDocCompleted(state, 'users', 'doc2');
-
-            expect(state.completedDocs.users).toEqual(['doc1', 'doc2']);
+            const config = {
+                ...baseConfig,
+                collections: ['users'],
+            } as Config;
+            const { errors, warnings } = validateStateForResume(state, config);
+            expect(errors).toHaveLength(0);
+            expect(warnings).toHaveLength(1);
+            expect(warnings[0]).toContain('removed_collection');
+            expect(warnings[0]).toContain('ignored');
         });
     });
 

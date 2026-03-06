@@ -5,7 +5,7 @@
 export interface WhereFilter {
     field: string;
     operator: FirebaseFirestore.WhereFilterOp;
-    value: string | number | boolean;
+    value: string | number | boolean | null;
 }
 
 export interface Config {
@@ -38,6 +38,7 @@ export interface Config {
     detectConflicts: boolean;
     maxDepth: number;
     verifyIntegrity: boolean;
+    allowHttpWebhook: boolean;
 }
 
 // Config after validation - required fields are guaranteed non-null
@@ -121,5 +122,6 @@ export interface CliArgs {
     detectConflicts?: boolean;
     maxDepth?: number;
     verifyIntegrity?: boolean;
+    allowHttpWebhook?: boolean;
     validateOnly?: boolean;
 }

@@ -38,6 +38,7 @@ function createConfig(overrides: Partial<Config> = {}): Config {
         detectConflicts: false,
         maxDepth: 0,
         verifyIntegrity: false,
+        allowHttpWebhook: false,
         ...overrides,
     };
 }
@@ -178,6 +179,106 @@ describe('validateConfig', () => {
         const errors = validateConfig(config);
         expect(errors).toHaveLength(1);
         expect(errors[0]).toContain('empty');
+    });
+
+    // Numeric bounds validation
+    test('returns error for batch size below 1', () => {
+        const config = createConfig({ batchSize: 0 });
+        const errors = validateConfig(config);
+        expect(errors.some((e) => e.includes('Batch size'))).toBe(true);
+    });
+
+    test('returns error for batch size above 500', () => {
+        const config = createConfig({ batchSize: 501 });
+        const errors = validateConfig(config);
+        expect(errors.some((e) => e.includes('Batch size'))).toBe(true);
+    });
+
+    test('returns error for parallel below 1', () => {
+        const config = createConfig({ parallel: 0 });
+        const errors = validateConfig(config);
+        expect(errors.some((e) => e.includes('Parallel'))).toBe(true);
+    });
+
+    test('returns error for parallel above 20', () => {
+        const config = createConfig({ parallel: 21 });
+        const errors = validateConfig(config);
+        expect(errors.some((e) => e.includes('Parallel'))).toBe(true);
+    });
+
+    test('returns error for negative rate limit', () => {
+        const config = createConfig({ rateLimit: -1 });
+        const errors = validateConfig(config);
+        expect(errors.some((e) => e.includes('Rate limit'))).toBe(true);
+    });
+
+    test('allows zero rate limit (unlimited)', () => {
+        const config = createConfig({ rateLimit: 0 });
+        const errors = validateConfig(config);
+        expect(errors.some((e) => e.includes('Rate limit'))).toBe(false);
+    });
+
+    test('returns error for max depth above 100', () => {
+        const config = createConfig({ maxDepth: 101 });
+        const errors = validateConfig(config);
+        expect(errors.some((e) => e.includes('Max depth'))).toBe(true);
+    });
+
+    test('returns error for negative max depth', () => {
+        const config = createConfig({ maxDepth: -1 });
+        const errors = validateConfig(config);
+        expect(errors.some((e) => e.includes('Max depth'))).toBe(true);
+    });
+
+    test('returns error for retries above 10', () => {
+        const config = createConfig({ retries: 11 });
+        const errors = validateConfig(config);
+        expect(errors.some((e) => e.includes('Retries'))).toBe(true);
+    });
+
+    test('returns error for negative retries', () => {
+        const config = createConfig({ retries: -1 });
+        const errors = validateConfig(config);
+        expect(errors.some((e) => e.includes('Retries'))).toBe(true);
+    });
+
+    test('returns error for negative limit', () => {
+        const config = createConfig({ limit: -1 });
+        const errors = validateConfig(config);
+        expect(errors.some((e) => e.includes('Document limit'))).toBe(true);
+    });
+
+    test('allows zero limit (no limit)', () => {
+        const config = createConfig({ limit: 0 });
+        const errors = validateConfig(config);
+        expect(errors.some((e) => e.includes('Document limit'))).toBe(false);
+    });
+
+    // Rename mapping validation
+    test('returns error for reserved rename destination', () => {
+        const config = createConfig({
+            renameCollection: { users: '__reserved__' },
+        });
+        const errors = validateConfig(config);
+        expect(errors.some((e) => e.includes('rename destination'))).toBe(true);
+    });
+
+    test('returns error for reserved rename source', () => {
+        const config = createConfig({
+            renameCollection: { __bad__: 'good' },
+        });
+        const errors = validateConfig(config);
+        expect(errors.some((e) => e.includes('rename source'))).toBe(true);
+    });
+
+    test('allows valid rename mappings', () => {
+        const config = createConfig({
+            sourceProject: 'a',
+            destProject: 'b',
+            renameCollection: { users: 'users_backup' },
+        });
+        const errors = validateConfig(config);
+        expect(errors.some((e) => e.includes('rename'))).toBe(false);
     });
 });
 

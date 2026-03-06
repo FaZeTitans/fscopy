@@ -12,22 +12,21 @@ export interface FirebaseConnections {
     destDb: Firestore;
 }
 
-export function initializeFirebase(config: Config): FirebaseConnections {
-    sourceApp = admin.initializeApp(
-        {
-            credential: admin.credential.applicationDefault(),
-            projectId: config.sourceProject!,
-        },
-        'source'
-    );
+function getAppOptions(projectId: string): admin.AppOptions {
+    const isEmulator = !!process.env.FIRESTORE_EMULATOR_HOST;
+    return {
+        projectId,
+        ...(isEmulator ? {} : { credential: admin.credential.applicationDefault() }),
+    };
+}
 
-    destApp = admin.initializeApp(
-        {
-            credential: admin.credential.applicationDefault(),
-            projectId: config.destProject!,
-        },
-        'dest'
-    );
+export function initializeFirebase(config: Config): FirebaseConnections {
+    if (sourceApp || destApp) {
+        throw new Error('Firebase already initialized. Call cleanupFirebase() first.');
+    }
+
+    sourceApp = admin.initializeApp(getAppOptions(config.sourceProject!), 'source');
+    destApp = admin.initializeApp(getAppOptions(config.destProject!), 'dest');
 
     return {
         sourceDb: sourceApp.firestore(),
@@ -52,7 +51,8 @@ export async function checkDatabaseConnectivity(
         const errorInfo = formatFirebaseError(err);
         const hint = errorInfo.suggestion ? `\n   Hint: ${errorInfo.suggestion}` : '';
         throw new Error(
-            `Cannot connect to source database (${config.sourceProject}): ${errorInfo.message}${hint}`
+            `Cannot connect to source database (${config.sourceProject}): ${errorInfo.message}${hint}`,
+            { cause: error }
         );
     }
 
@@ -66,7 +66,8 @@ export async function checkDatabaseConnectivity(
             const errorInfo = formatFirebaseError(err);
             const hint = errorInfo.suggestion ? `\n   Hint: ${errorInfo.suggestion}` : '';
             throw new Error(
-                `Cannot connect to destination database (${config.destProject}): ${errorInfo.message}${hint}`
+                `Cannot connect to destination database (${config.destProject}): ${errorInfo.message}${hint}`,
+                { cause: error }
             );
         }
     } else {
@@ -77,6 +78,16 @@ export async function checkDatabaseConnectivity(
 }
 
 export async function cleanupFirebase(): Promise<void> {
-    if (sourceApp) await sourceApp.delete();
-    if (destApp) await destApp.delete();
+    try {
+        if (sourceApp) await sourceApp.delete();
+    } catch {
+        // Ignore cleanup errors - app may already be deleted
+    }
+    try {
+        if (destApp) await destApp.delete();
+    } catch {
+        // Ignore cleanup errors - app may already be deleted
+    }
+    sourceApp = null;
+    destApp = null;
 }

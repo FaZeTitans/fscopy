@@ -79,6 +79,7 @@ function createBaseConfig(overrides: Partial<Config> = {}): Config {
         detectConflicts: false,
         maxDepth: 0,
         verifyIntegrity: false,
+        allowHttpWebhook: false,
         ...overrides,
     };
 }

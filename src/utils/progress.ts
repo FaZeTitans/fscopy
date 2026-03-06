@@ -136,6 +136,16 @@ export class ProgressBarWrapper {
     }
 
     /**
+     * Increase the progress bar total by the given amount.
+     * Used for dynamically discovered work (e.g., subcollections).
+     */
+    addToTotal(count: number): void {
+        if (this.bar && count > 0) {
+            this.bar.setTotal(this.bar.getTotal() + count);
+        }
+    }
+
+    /**
      * Check if the progress bar is active.
      */
     get isActive(): boolean {

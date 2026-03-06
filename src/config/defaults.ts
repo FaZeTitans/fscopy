@@ -30,6 +30,7 @@ export const defaults: Config = {
     detectConflicts: false,
     maxDepth: 0,
     verifyIntegrity: false,
+    allowHttpWebhook: false,
 };
 
 export const iniTemplate = `; fscopy configuration file

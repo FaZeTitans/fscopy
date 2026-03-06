@@ -61,6 +61,7 @@ function createMockConfig(overrides: Partial<Config> = {}): ValidatedConfig {
         maxDepth: 0,
         transformSamples: 3,
         verifyIntegrity: false,
+        allowHttpWebhook: false,
         ...overrides,
     } as ValidatedConfig;
 }
@@ -89,7 +90,8 @@ function createMockOutput(): Output {
 }
 
 describe('Firebase Module', () => {
-    beforeEach(() => {
+    beforeEach(async () => {
+        await cleanupFirebase();
         mockAdmin.initializeApp.mockClear();
         mockApp.delete.mockClear();
         mockFirestore.listCollections.mockClear();

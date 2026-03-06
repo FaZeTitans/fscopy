@@ -3,9 +3,18 @@ import path from 'node:path';
 import ini from 'ini';
 import type { Config, WhereFilter, CliArgs } from '../types.js';
 
+const SUPPORTED_EXTENSIONS = new Set(['.ini', '.json', '.cfg', '.conf']);
+
+function stderrWarn(message: string): void {
+    process.stderr.write(`${message}\n`);
+}
+
 export function getFileFormat(filePath: string): 'json' | 'ini' {
     const ext = path.extname(filePath).toLowerCase();
     if (ext === '.json') return 'json';
+    if (ext && !SUPPORTED_EXTENSIONS.has(ext)) {
+        stderrWarn(`⚠️  Unrecognized config file extension "${ext}", parsing as INI format`);
+    }
     return 'ini';
 }
 
@@ -22,7 +31,7 @@ export function parseWhereFilter(filterStr: string): WhereFilter | null {
     const match = new RegExp(operatorRegex).exec(filterStr);
 
     if (!match) {
-        console.warn(`⚠️  Invalid where filter: "${filterStr}" (missing operator)`);
+        stderrWarn(`⚠️  Invalid where filter: "${filterStr}" (missing operator)`);
         return null;
     }
 
@@ -30,20 +39,20 @@ export function parseWhereFilter(filterStr: string): WhereFilter | null {
     const [fieldPart, valuePart] = filterStr.split(operatorRegex).filter((_, i) => i !== 1);
 
     if (!fieldPart || !valuePart) {
-        console.warn(`⚠️  Invalid where filter: "${filterStr}" (missing field or value)`);
+        stderrWarn(`⚠️  Invalid where filter: "${filterStr}" (missing field or value)`);
         return null;
     }
 
     const field = fieldPart.trim();
     const rawValue = valuePart.trim();
 
-    let value: string | number | boolean;
+    let value: string | number | boolean | null;
     if (rawValue === 'true') {
         value = true;
     } else if (rawValue === 'false') {
         value = false;
     } else if (rawValue === 'null') {
-        value = null as unknown as string;
+        value = null;
     } else if (!Number.isNaN(Number(rawValue)) && rawValue !== '') {
         value = Number(rawValue);
     } else {
@@ -84,13 +93,13 @@ export function parseRenameMapping(
         const mapping = String(item).trim();
         const colonIndex = mapping.indexOf(':');
         if (colonIndex === -1) {
-            console.warn(`⚠️  Invalid rename mapping: "${mapping}" (missing ':')`);
+            stderrWarn(`⚠️  Invalid rename mapping: "${mapping}" (missing ':')`);
             continue;
         }
         const source = mapping.slice(0, colonIndex).trim();
         const dest = mapping.slice(colonIndex + 1).trim();
         if (!source || !dest) {
-            console.warn(`⚠️  Invalid rename mapping: "${mapping}" (empty source or dest)`);
+            stderrWarn(`⚠️  Invalid rename mapping: "${mapping}" (empty source or dest)`);
             continue;
         }
         result[source] = dest;
@@ -164,11 +173,21 @@ export function parseIniConfig(content: string): Partial<Config> {
         webhook: parsed.options?.webhook ?? null,
         retries: parseIntOption(parsed.options?.retries),
         rateLimit: parseIntOption(parsed.options?.rateLimit),
-        skipOversized: parsed.options?.skipOversized !== undefined ? parseBoolean(parsed.options.skipOversized) : undefined,
-        detectConflicts: parsed.options?.detectConflicts !== undefined ? parseBoolean(parsed.options.detectConflicts) : undefined,
+        skipOversized:
+            parsed.options?.skipOversized !== undefined
+                ? parseBoolean(parsed.options.skipOversized)
+                : undefined,
+        detectConflicts:
+            parsed.options?.detectConflicts !== undefined
+                ? parseBoolean(parsed.options.detectConflicts)
+                : undefined,
         maxDepth: parseIntOption(parsed.options?.maxDepth),
-        verify: parsed.options?.verify !== undefined ? parseBoolean(parsed.options.verify) : undefined,
-        verifyIntegrity: parsed.options?.verifyIntegrity !== undefined ? parseBoolean(parsed.options.verifyIntegrity) : undefined,
+        verify:
+            parsed.options?.verify !== undefined ? parseBoolean(parsed.options.verify) : undefined,
+        verifyIntegrity:
+            parsed.options?.verifyIntegrity !== undefined
+                ? parseBoolean(parsed.options.verifyIntegrity)
+                : undefined,
     };
 }
 
@@ -241,9 +260,21 @@ export function loadConfigFile(configPath?: string): Partial<Config> {
     const content = fs.readFileSync(absolutePath, 'utf-8');
     const format = getFileFormat(absolutePath);
 
-    console.log(`📄 Loaded config from: ${absolutePath} (${format.toUpperCase()})\n`);
+    process.stderr.write(`📄 Loaded config from: ${absolutePath} (${format.toUpperCase()})\n`);
 
     return format === 'json' ? parseJsonConfig(content) : parseIniConfig(content);
+}
+
+/**
+ * Resolve a config value with priority: CLI > file > default.
+ */
+function resolve<K extends keyof Config>(
+    key: K,
+    cliArgs: Partial<Record<K, Config[K]>>,
+    fileConfig: Partial<Config>,
+    defaultConfig: Config
+): Config[K] {
+    return (cliArgs[key] ?? fileConfig[key] ?? defaultConfig[key]) as Config[K];
 }
 
 export function mergeConfig(
@@ -254,46 +285,52 @@ export function mergeConfig(
     const cliWhereFilters = parseWhereFilters(cliArgs.where);
     const cliRenameCollection = parseRenameMapping(cliArgs.renameCollection);
 
-    return {
-        collections: cliArgs.collections ?? fileConfig.collections ?? defaultConfig.collections,
-        includeSubcollections:
-            cliArgs.includeSubcollections ??
-            fileConfig.includeSubcollections ??
-            defaultConfig.includeSubcollections,
-        dryRun: cliArgs.dryRun ?? fileConfig.dryRun ?? defaultConfig.dryRun,
-        batchSize: cliArgs.batchSize ?? fileConfig.batchSize ?? defaultConfig.batchSize,
-        limit: cliArgs.limit ?? fileConfig.limit ?? defaultConfig.limit,
-        sourceProject:
-            cliArgs.sourceProject ?? fileConfig.sourceProject ?? defaultConfig.sourceProject,
-        destProject: cliArgs.destProject ?? fileConfig.destProject ?? defaultConfig.destProject,
-        where:
-            cliWhereFilters.length > 0
-                ? cliWhereFilters
-                : (fileConfig.where ?? defaultConfig.where),
-        exclude: cliArgs.exclude ?? fileConfig.exclude ?? defaultConfig.exclude,
-        merge: cliArgs.merge ?? fileConfig.merge ?? defaultConfig.merge,
-        parallel: cliArgs.parallel ?? fileConfig.parallel ?? defaultConfig.parallel,
-        clear: cliArgs.clear ?? fileConfig.clear ?? defaultConfig.clear,
-        deleteMissing:
-            cliArgs.deleteMissing ?? fileConfig.deleteMissing ?? defaultConfig.deleteMissing,
-        transform: cliArgs.transform ?? fileConfig.transform ?? defaultConfig.transform,
-        renameCollection:
-            Object.keys(cliRenameCollection).length > 0
-                ? cliRenameCollection
-                : (fileConfig.renameCollection ?? defaultConfig.renameCollection),
-        idPrefix: cliArgs.idPrefix ?? fileConfig.idPrefix ?? defaultConfig.idPrefix,
-        idSuffix: cliArgs.idSuffix ?? fileConfig.idSuffix ?? defaultConfig.idSuffix,
-        webhook: cliArgs.webhook ?? fileConfig.webhook ?? defaultConfig.webhook,
-        retries: cliArgs.retries ?? fileConfig.retries ?? defaultConfig.retries,
-        resume: cliArgs.resume ?? defaultConfig.resume,
-        stateFile: cliArgs.stateFile ?? defaultConfig.stateFile,
-        verify: cliArgs.verify ?? fileConfig.verify ?? defaultConfig.verify,
-        rateLimit: cliArgs.rateLimit ?? fileConfig.rateLimit ?? defaultConfig.rateLimit,
-        skipOversized: cliArgs.skipOversized ?? fileConfig.skipOversized ?? defaultConfig.skipOversized,
-        json: cliArgs.json ?? defaultConfig.json,
-        transformSamples: cliArgs.transformSamples ?? defaultConfig.transformSamples,
-        detectConflicts: cliArgs.detectConflicts ?? fileConfig.detectConflicts ?? defaultConfig.detectConflicts,
-        maxDepth: cliArgs.maxDepth ?? fileConfig.maxDepth ?? defaultConfig.maxDepth,
-        verifyIntegrity: cliArgs.verifyIntegrity ?? fileConfig.verifyIntegrity ?? defaultConfig.verifyIntegrity,
-    };
+    // Keys that follow standard CLI > file > default priority
+    const standardKeys = [
+        'collections',
+        'includeSubcollections',
+        'dryRun',
+        'batchSize',
+        'limit',
+        'sourceProject',
+        'destProject',
+        'exclude',
+        'merge',
+        'parallel',
+        'clear',
+        'deleteMissing',
+        'transform',
+        'idPrefix',
+        'idSuffix',
+        'webhook',
+        'retries',
+        'verify',
+        'rateLimit',
+        'skipOversized',
+        'detectConflicts',
+        'maxDepth',
+        'verifyIntegrity',
+    ] as const;
+
+    const merged = {} as Record<string, unknown>;
+    for (const key of standardKeys) {
+        merged[key] = resolve(key, cliArgs, fileConfig, defaultConfig);
+    }
+
+    // Special cases: where/rename have non-trivial merge logic
+    merged.where =
+        cliWhereFilters.length > 0 ? cliWhereFilters : (fileConfig.where ?? defaultConfig.where);
+    merged.renameCollection =
+        Object.keys(cliRenameCollection).length > 0
+            ? cliRenameCollection
+            : (fileConfig.renameCollection ?? defaultConfig.renameCollection);
+
+    // CLI-only options (no file config support)
+    merged.resume = cliArgs.resume ?? defaultConfig.resume;
+    merged.stateFile = cliArgs.stateFile ?? defaultConfig.stateFile;
+    merged.json = cliArgs.json ?? defaultConfig.json;
+    merged.transformSamples = cliArgs.transformSamples ?? defaultConfig.transformSamples;
+    merged.allowHttpWebhook = cliArgs.allowHttpWebhook ?? defaultConfig.allowHttpWebhook;
+
+    return merged as unknown as Config;
 }

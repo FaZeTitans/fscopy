@@ -1,27 +1,13 @@
-import type { Firestore, Query } from 'firebase-admin/firestore';
+import type { Firestore, Query, QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import type { Config } from '../types.js';
 import { matchesExcludePattern } from '../utils/patterns.js';
-import { getSubcollections } from './helpers.js';
+import { getSubcollections, buildQueryWithFilters } from './helpers.js';
+import { CLEAR_PAGE_SIZE } from '../constants.js';
 
 export interface CountProgress {
     onCollection?: (path: string, count: number) => void;
     onSubcollection?: (path: string) => void;
     onSubcollectionExcluded?: (name: string) => void;
-}
-
-function buildQueryWithFilters(
-    sourceDb: Firestore,
-    collectionPath: string,
-    config: Config,
-    depth: number
-): Query {
-    let query: Query = sourceDb.collection(collectionPath);
-    if (depth === 0 && config.where.length > 0) {
-        for (const filter of config.where) {
-            query = query.where(filter.field, filter.operator, filter.value);
-        }
-    }
-    return query;
 }
 
 async function countWithSubcollections(
@@ -32,30 +18,53 @@ async function countWithSubcollections(
     depth: number,
     progress?: CountProgress
 ): Promise<number> {
-    // Apply limit at root level only
-    if (depth === 0 && config.limit > 0) {
-        query = query.limit(config.limit);
+    const userLimit = depth === 0 && config.limit > 0 ? config.limit : 0;
+    let rootCount = 0;
+    let subCount = 0;
+    let lastDoc: QueryDocumentSnapshot | undefined;
+
+    while (true) {
+        let pageSize = CLEAR_PAGE_SIZE;
+        if (userLimit > 0) {
+            const remaining = userLimit - rootCount;
+            if (remaining <= 0) break;
+            pageSize = Math.min(pageSize, remaining);
+        }
+
+        let pageQuery = query.select().limit(pageSize);
+        if (lastDoc) {
+            pageQuery = pageQuery.startAfter(lastDoc);
+        }
+
+        const snapshot = await pageQuery.get();
+        if (snapshot.empty) break;
+
+        rootCount += snapshot.size;
+
+        if (depth === 0 && progress?.onCollection) {
+            progress.onCollection(collectionPath, rootCount);
+        }
+
+        for (const doc of snapshot.docs) {
+            subCount += await countSubcollectionsForDoc(
+                sourceDb,
+                doc,
+                collectionPath,
+                config,
+                depth,
+                progress
+            );
+        }
+
+        lastDoc = snapshot.docs[snapshot.docs.length - 1];
+        if (snapshot.size < pageSize) break;
     }
 
-    const snapshot = await query.select().get();
-    let count = snapshot.size;
-
-    if (depth === 0 && progress?.onCollection) {
-        progress.onCollection(collectionPath, snapshot.size);
+    if (rootCount === 0 && depth === 0 && progress?.onCollection) {
+        progress.onCollection(collectionPath, 0);
     }
 
-    for (const doc of snapshot.docs) {
-        count += await countSubcollectionsForDoc(
-            sourceDb,
-            doc,
-            collectionPath,
-            config,
-            depth,
-            progress
-        );
-    }
-
-    return count;
+    return rootCount + subCount;
 }
 
 async function countSubcollectionsForDoc(

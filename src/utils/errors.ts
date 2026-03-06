@@ -1,3 +1,8 @@
+/** Error with optional Firebase/gRPC error code */
+export interface FirebaseError extends Error {
+    code?: string;
+}
+
 export interface FirebaseErrorInfo {
     message: string;
     suggestion?: string;
@@ -95,7 +100,7 @@ const errorMap: Record<string, FirebaseErrorInfo> = {
     },
 };
 
-export function formatFirebaseError(error: Error & { code?: string }): FirebaseErrorInfo {
+export function formatFirebaseError(error: FirebaseError): FirebaseErrorInfo {
     // Check by error code first
     if (error.code) {
         const mapped = errorMap[error.code];
@@ -133,7 +138,7 @@ export function formatFirebaseError(error: Error & { code?: string }): FirebaseE
 }
 
 export function logFirebaseError(
-    error: Error & { code?: string },
+    error: FirebaseError,
     context: string,
     logger?: { error: (msg: string, data?: Record<string, unknown>) => void }
 ): void {

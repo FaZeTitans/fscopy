@@ -7,7 +7,7 @@ import { RateLimiter } from './utils/rate-limiter.js';
 import { ProgressBarWrapper } from './utils/progress.js';
 import { loadTransferState, saveTransferState, createInitialState, validateStateForResume, deleteTransferState, StateSaver } from './state/index.js';
 import { sendWebhook } from './webhook/index.js';
-import { countDocuments, transferCollection, clearCollection, deleteOrphanDocuments, processInParallel, getDestCollectionPath, type TransferContext, type CountProgress, type DeleteOrphansProgress } from './transfer/index.js';
+import { countDocuments, transferCollection, clearCollection, deleteOrphanDocuments, processInParallel, getDestCollectionPath, buildQueryWithFilters, type TransferContext, type CountProgress, type DeleteOrphansProgress } from './transfer/index.js';
 import { initializeFirebase, checkDatabaseConnectivity, cleanupFirebase } from './firebase/index.js';
 import { loadTransformFunction } from './transform/loader.js';
 import { printSummary, formatJsonOutput } from './output/display.js';
@@ -32,9 +32,12 @@ function initializeResumeMode(config: ValidatedConfig, output: Output): ResumeRe
             throw new Error(`No state file found at ${config.stateFile}. Cannot resume without a saved state. Run without --resume to start fresh.`);
         }
 
-        const stateErrors = validateStateForResume(existingState, config);
+        const { errors: stateErrors, warnings: stateWarnings } = validateStateForResume(existingState, config);
         if (stateErrors.length > 0) {
             throw new Error(`Cannot resume: state file incompatible with current config:\n   - ${stateErrors.join('\n   - ')}`);
+        }
+        for (const warning of stateWarnings) {
+            output.warn(`⚠️  ${warning}`);
         }
 
         const completedCount = Object.values(existingState.completedDocs).reduce((sum, ids) => sum + ids.length, 0);
@@ -148,6 +151,31 @@ function displayTransferOptions(config: Config, rateLimiter: RateLimiter | null,
 export async function runTransfer(config: ValidatedConfig, argv: CliArgs, output: Output): Promise<TransferResult> {
     const startTime = Date.now();
 
+    // Graceful shutdown state
+    let stateSaverRef: StateSaver | null = null;
+    let progressBarRef: ProgressBarWrapper | null = null;
+    let interrupted = false;
+
+    const onSignal = () => {
+        if (interrupted) {
+            // Second signal: force exit
+            process.exit(130);
+        }
+        interrupted = true;
+
+        // Flush state and stop progress bar synchronously
+        stateSaverRef?.flush();
+        progressBarRef?.stop();
+
+        output.print('\n\n⚠️  Transfer interrupted. State saved for resume (use --resume).');
+        process.exit(130);
+    };
+
+    process.on('SIGINT', onSignal);
+    process.on('SIGTERM', onSignal);
+
+    let currentStats: Stats = createEmptyStats();
+
     try {
         const { state: transferState, stats } = initializeResumeMode(config, output);
         const transformFn = await loadTransform(config, output);
@@ -156,26 +184,29 @@ export async function runTransfer(config: ValidatedConfig, argv: CliArgs, output
         const { sourceDb, destDb } = initializeFirebase(config);
         await checkDatabaseConnectivity(sourceDb, destDb, config, output);
 
-        if (transformFn && config.dryRun && config.transformSamples !== 0) {
+        if (transformFn && config.transformSamples !== 0) {
             await validateTransformWithSamples(sourceDb, config, transformFn, output);
         }
 
-        const currentStats = config.resume ? stats : createEmptyStats();
+        currentStats = config.resume ? stats : createEmptyStats();
 
         if (config.clear) {
             await clearDestinationCollections(destDb, config, currentStats, output);
         }
 
         const { progressBar } = await setupProgressTracking(sourceDb, config, currentStats, output);
+        progressBarRef = progressBar;
 
         const rateLimiter = config.rateLimit > 0 ? new RateLimiter(config.rateLimit) : null;
         displayTransferOptions(config, rateLimiter, output);
 
         const stateSaver = transferState ? new StateSaver(config.stateFile, transferState) : null;
+        stateSaverRef = stateSaver;
 
         const conflictList: ConflictInfo[] = [];
         const ctx: TransferContext = {
-            sourceDb, destDb, config, stats: currentStats, output, progressBar, transformFn, stateSaver, rateLimiter, conflictList
+            sourceDb, destDb, config, stats: currentStats, output, progressBar, transformFn,
+            stateSaver, rateLimiter, conflictList, maxDepthWarningsShown: new Set<string>(),
         };
 
         await executeTransfer(ctx, output);
@@ -206,10 +237,13 @@ export async function runTransfer(config: ValidatedConfig, argv: CliArgs, output
         const errorMessage = (error as Error).message;
         const duration = (Date.now() - startTime) / 1000;
 
-        await handleErrorOutput(config, createEmptyStats(), duration, errorMessage, output);
+        await handleErrorOutput(config, currentStats, duration, errorMessage, output);
         await cleanupFirebase();
 
-        return { success: false, stats: createEmptyStats(), duration, error: errorMessage };
+        return { success: false, stats: currentStats, duration, error: errorMessage };
+    } finally {
+        process.removeListener('SIGINT', onSignal);
+        process.removeListener('SIGTERM', onSignal);
     }
 }
 
@@ -295,62 +329,40 @@ async function setupProgressTracking(
     if (!output.isQuiet) {
         output.info('📊 Counting documents...');
 
-        for (const collection of config.collections) {
-            let rootCount = 0;
-            let subcollectionInstances = 0;
-            const subcollectionNames = new Set<string>();
-            const excludedNames = new Set<string>();
-            let lastLog = Date.now();
-            let showedScanLine = false;
+        if (config.includeSubcollections) {
+            // Use .count() aggregation for root collections (1 read per collection)
+            // Subcollection docs will be counted lazily during transfer to avoid
+            // reading every document twice (once for count, once for transfer)
+            for (const collection of config.collections) {
+                const query = buildQueryWithFilters(sourceDb, collection, config, 0);
+                const countSnap = await query.count().get();
+                let rootCount = countSnap.data().count;
 
-            if (canWriteProgress(output)) {
-                process.stdout.write(`   Counting ${collection}...`);
-                showedScanLine = true;
+                if (config.limit > 0) {
+                    rootCount = Math.min(rootCount, config.limit);
+                }
+
+                totalDocs += rootCount;
+                output.info(`   ${collection}: ${rootCount} documents (+ subcollections)`);
             }
 
-            const countProgress: CountProgress = {
-                onCollection: (_path, count) => {
-                    rootCount = count;
-                },
-                onSubcollection: (path) => {
-                    subcollectionInstances++;
-                    const segments = path.split('/');
-                    subcollectionNames.add(segments[segments.length - 1]);
+            output.info(`\n   Total: ${totalDocs} root documents (subcollections counted during transfer)\n`);
+        } else {
+            // Without subcollections, use the efficient countDocuments (already uses .count())
+            for (const collection of config.collections) {
+                const countProgress: CountProgress = {
+                    onCollection: (_path, count) => {
+                        output.info(`   ${collection}: ${count} documents`);
+                    },
+                };
 
-                    if (!canWriteProgress(output)) return;
-                    const now = Date.now();
-                    if (now - lastLog > PROGRESS_LOG_INTERVAL_MS) {
-                        process.stdout.write(`\r   Scanning ${collection}... (${subcollectionInstances} subcollections found)`);
-                        showedScanLine = true;
-                        lastLog = now;
-                    }
-                },
-                onSubcollectionExcluded: (name) => {
-                    excludedNames.add(name);
-                },
-            };
-
-            const collectionTotal = await countDocuments(sourceDb, collection, config, 0, countProgress);
-            totalDocs += collectionTotal;
-
-            // Clear live indicator line
-            if (showedScanLine && canWriteProgress(output)) {
-                clearLine();
+                const collectionTotal = await countDocuments(sourceDb, collection, config, 0, countProgress);
+                totalDocs += collectionTotal;
             }
 
-            // Print collection summary
-            output.info(`   ${collection}: ${rootCount} documents`);
-
-            if (subcollectionInstances > 0) {
-                const subDocs = collectionTotal - rootCount;
-                output.info(`      + ${subDocs} in subcollections (${formatNameList(subcollectionNames)})`);
-            }
-            if (excludedNames.size > 0) {
-                output.info(`      Excluded: ${formatNameList(excludedNames)}`);
-            }
+            output.info(`\n   Total: ${totalDocs} documents to transfer\n`);
         }
 
-        output.info(`\n   Total: ${totalDocs} documents to transfer\n`);
         if (canWriteProgress(output)) {
             progressBar.start(totalDocs, stats);
         }

@@ -1,4 +1,5 @@
 import type { Config, ValidatedConfig } from '../types.js';
+import { MAX_BATCH_SIZE, MAX_PARALLEL, MAX_DEPTH, MAX_RETRIES } from '../constants.js';
 
 /**
  * Validate a Firestore collection or document ID.
@@ -75,6 +76,56 @@ export function validateConfig(config: Config): string[] {
     for (const collection of config.collections) {
         const pathErrors = validateCollectionPath(collection);
         errors.push(...pathErrors);
+    }
+
+    // Validate rename mapping names as valid Firestore IDs
+    for (const [source, dest] of Object.entries(config.renameCollection)) {
+        const sourceError = validateFirestoreId(source, 'collection');
+        if (sourceError) {
+            errors.push(`Invalid rename source "${source}": ${sourceError}`);
+        }
+        const destError = validateFirestoreId(dest, 'collection');
+        if (destError) {
+            errors.push(`Invalid rename destination "${dest}": ${destError}`);
+        }
+    }
+
+    // Validate numeric bounds
+    if (config.batchSize < 1 || config.batchSize > MAX_BATCH_SIZE) {
+        errors.push(`Batch size must be between 1 and ${MAX_BATCH_SIZE} (Firestore limit)`);
+    }
+    if (config.parallel < 1 || config.parallel > MAX_PARALLEL) {
+        errors.push(`Parallel must be between 1 and ${MAX_PARALLEL}`);
+    }
+    if (config.rateLimit < 0) {
+        errors.push('Rate limit must be 0 (unlimited) or a positive number');
+    }
+    if (config.maxDepth < 0 || config.maxDepth > MAX_DEPTH) {
+        errors.push(`Max depth must be between 0 (unlimited) and ${MAX_DEPTH}`);
+    }
+    if (config.retries < 0 || config.retries > MAX_RETRIES) {
+        errors.push(`Retries must be between 0 and ${MAX_RETRIES}`);
+    }
+    if (config.limit < 0) {
+        errors.push('Document limit must be 0 (no limit) or a positive number');
+    }
+
+    // Validate rename mapping for collisions (multiple sources mapping to same dest)
+    const renameDestinations = Object.values(config.renameCollection);
+    const seenDests = new Set<string>();
+    for (const dest of renameDestinations) {
+        if (seenDests.has(dest)) {
+            errors.push(`Rename collision: multiple collections map to destination "${dest}"`);
+        }
+        seenDests.add(dest);
+    }
+
+    // Validate idPrefix/idSuffix format
+    if (config.idPrefix !== null && config.idPrefix.includes('/')) {
+        errors.push('ID prefix cannot contain "/" (would create invalid document paths)');
+    }
+    if (config.idSuffix !== null && config.idSuffix.includes('/')) {
+        errors.push('ID suffix cannot contain "/" (would create invalid document paths)');
     }
 
     return errors;

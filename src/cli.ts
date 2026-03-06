@@ -61,7 +61,7 @@ const argv = yargs(hideBin(process.argv))
     .option('limit', {
         alias: 'l',
         type: 'number',
-        description: 'Limit number of documents per collection (0 = no limit)',
+        description: 'Limit number of documents per root collection (0 = no limit, does not apply to subcollections)',
     })
     .option('source-project', {
         type: 'string',
@@ -196,6 +196,11 @@ const argv = yargs(hideBin(process.argv))
         type: 'boolean',
         description: 'Verify document integrity with hash after transfer',
     })
+    .option('allow-http-webhook', {
+        type: 'boolean',
+        description: 'Allow webhook URLs using HTTP instead of HTTPS',
+        default: false,
+    })
     .option('validate-only', {
         type: 'boolean',
         description: 'Only validate config and display it (no transfer)',
@@ -269,7 +274,10 @@ async function main(): Promise<void> {
 
     // Validate webhook URL if configured
     if (validConfig.webhook) {
-        const webhookValidation = validateWebhookUrl(validConfig.webhook);
+        const webhookValidation = validateWebhookUrl(
+            validConfig.webhook,
+            validConfig.allowHttpWebhook
+        );
         if (!webhookValidation.valid) {
             console.log(`\n❌ ${webhookValidation.warning}`);
             process.exit(1);

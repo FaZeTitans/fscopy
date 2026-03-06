@@ -28,10 +28,13 @@ export function ensureCredentials(): void {
     const { exists, path: credPath } = checkCredentialsExist();
 
     if (!exists) {
-        console.error('\n❌ Google Cloud credentials not found.');
-        console.error(`   Expected at: ${credPath}\n`);
-        console.error('   Run this command to authenticate:');
-        console.error('   gcloud auth application-default login\n');
+        const msg = [
+            '\n❌ Google Cloud credentials not found.',
+            `   Expected at: ${credPath}\n`,
+            '   Run this command to authenticate:',
+            '   gcloud auth application-default login\n',
+        ].join('\n');
+        process.stderr.write(msg);
         process.exit(1);
     }
 }
