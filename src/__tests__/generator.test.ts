@@ -57,6 +57,9 @@ describe('generateConfigFile', () => {
         const result = generateConfigFile(filePath);
         expect(result).toBe(false);
 
+        // Reset exitCode set by generateConfigFile to avoid polluting the test runner
+        process.exitCode = 0;
+
         // Original content should be preserved
         const content = fs.readFileSync(filePath, 'utf-8');
         expect(content).toBe('existing content');
