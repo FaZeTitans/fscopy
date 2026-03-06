@@ -2,8 +2,7 @@ import type { Firestore, QueryDocumentSnapshot } from 'firebase-admin/firestore'
 import type { Config } from '../types.js';
 import type { Output } from '../utils/output.js';
 import { withRetry } from '../utils/retry.js';
-import { matchesExcludePattern } from '../utils/patterns.js';
-import { getSubcollections, getDestCollectionPath } from './helpers.js';
+import { getFilteredSubcollections, getDestCollectionPath } from './helpers.js';
 
 async function clearDocSubcollections(
     db: Firestore,
@@ -13,11 +12,9 @@ async function clearDocSubcollections(
     output: Output
 ): Promise<number> {
     let deletedCount = 0;
-    const subcollections = await getSubcollections(doc.ref);
+    const subcollections = await getFilteredSubcollections(doc.ref, config.exclude);
 
     for (const subId of subcollections) {
-        if (matchesExcludePattern(subId, config.exclude)) continue;
-
         const subPath = `${collectionPath}/${doc.id}/${subId}`;
         deletedCount += await clearCollection(db, subPath, config, output, true);
     }
@@ -90,11 +87,9 @@ async function clearOrphanSubcollections(
     output: Output
 ): Promise<number> {
     let deletedCount = 0;
-    const subcollections = await getSubcollections(doc.ref);
+    const subcollections = await getFilteredSubcollections(doc.ref, config.exclude);
 
     for (const subId of subcollections) {
-        if (matchesExcludePattern(subId, config.exclude)) continue;
-
         const subPath = `${destCollectionPath}/${doc.id}/${subId}`;
         deletedCount += await clearCollection(destDb, subPath, config, output, true);
     }
@@ -157,10 +152,8 @@ async function processSubcollectionOrphansWithProgress(
     let deletedCount = 0;
 
     for (const sourceDoc of sourceSnapshot.docs) {
-        const sourceSubcollections = await getSubcollections(sourceDoc.ref);
+        const sourceSubcollections = await getFilteredSubcollections(sourceDoc.ref, config.exclude);
         for (const subId of sourceSubcollections) {
-            if (matchesExcludePattern(subId, config.exclude)) continue;
-
             const subPath = `${sourceCollectionPath}/${sourceDoc.id}/${subId}`;
             progress?.onSubcollectionScan?.(subPath);
             deletedCount += await deleteOrphanDocuments(

@@ -77,6 +77,26 @@ export function validateConfig(config: Config): string[] {
         errors.push(...pathErrors);
     }
 
+    // Validate numeric bounds
+    if (config.batchSize < 1 || config.batchSize > 500) {
+        errors.push('Batch size must be between 1 and 500 (Firestore limit)');
+    }
+    if (config.parallel < 1 || config.parallel > 20) {
+        errors.push('Parallel must be between 1 and 20');
+    }
+    if (config.rateLimit < 0) {
+        errors.push('Rate limit must be 0 (unlimited) or a positive number');
+    }
+    if (config.maxDepth < 0 || config.maxDepth > 100) {
+        errors.push('Max depth must be between 0 (unlimited) and 100');
+    }
+    if (config.retries < 0 || config.retries > 10) {
+        errors.push('Retries must be between 0 and 10');
+    }
+    if (config.limit < 0) {
+        errors.push('Document limit must be 0 (no limit) or a positive number');
+    }
+
     return errors;
 }
 

@@ -398,8 +398,7 @@ describe('count module', () => {
         test('maxDepth=0 means unlimited depth', () => {
             const config = createMockConfig({ maxDepth: 0 });
 
-            const shouldStop = (depth: number) =>
-                config.maxDepth > 0 && depth >= config.maxDepth;
+            const shouldStop = (depth: number) => config.maxDepth > 0 && depth >= config.maxDepth;
 
             expect(shouldStop(0)).toBe(false);
             expect(shouldStop(1)).toBe(false);
@@ -410,8 +409,7 @@ describe('count module', () => {
         test('maxDepth=1 stops after first-level subcollections', () => {
             const config = createMockConfig({ maxDepth: 1 });
 
-            const shouldStop = (depth: number) =>
-                config.maxDepth > 0 && depth >= config.maxDepth;
+            const shouldStop = (depth: number) => config.maxDepth > 0 && depth >= config.maxDepth;
 
             // depth=0 is root collection, should continue to find subcollections
             expect(shouldStop(0)).toBe(false);
@@ -423,8 +421,7 @@ describe('count module', () => {
         test('maxDepth=2 allows root + two levels of subcollections', () => {
             const config = createMockConfig({ maxDepth: 2 });
 
-            const shouldStop = (depth: number) =>
-                config.maxDepth > 0 && depth >= config.maxDepth;
+            const shouldStop = (depth: number) => config.maxDepth > 0 && depth >= config.maxDepth;
 
             expect(shouldStop(0)).toBe(false);
             expect(shouldStop(1)).toBe(false);
@@ -440,8 +437,11 @@ describe('count module', () => {
                 counted.push(path);
                 // Simulate subcollection discovery
                 const subcollections =
-                    path === 'users' ? ['orders', 'settings'] :
-                    path === 'users/doc1/orders' ? ['items'] : [];
+                    path === 'users'
+                        ? ['orders', 'settings']
+                        : path === 'users/doc1/orders'
+                          ? ['items']
+                          : [];
 
                 for (const sub of subcollections) {
                     if (config.maxDepth > 0 && depth >= config.maxDepth) continue;
@@ -453,11 +453,7 @@ describe('count module', () => {
 
             // With maxDepth=1: root(depth=0) counted, subcollections at depth=0 explored,
             // but at depth=1 recursion stops (no items counted)
-            expect(counted).toEqual([
-                'users',
-                'users/doc1/orders',
-                'users/doc1/settings',
-            ]);
+            expect(counted).toEqual(['users', 'users/doc1/orders', 'users/doc1/settings']);
             expect(counted).not.toContain('users/doc1/orders/doc1/items');
         });
     });

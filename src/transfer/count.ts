@@ -1,27 +1,12 @@
 import type { Firestore, Query } from 'firebase-admin/firestore';
 import type { Config } from '../types.js';
 import { matchesExcludePattern } from '../utils/patterns.js';
-import { getSubcollections } from './helpers.js';
+import { getSubcollections, buildQueryWithFilters } from './helpers.js';
 
 export interface CountProgress {
     onCollection?: (path: string, count: number) => void;
     onSubcollection?: (path: string) => void;
     onSubcollectionExcluded?: (name: string) => void;
-}
-
-function buildQueryWithFilters(
-    sourceDb: Firestore,
-    collectionPath: string,
-    config: Config,
-    depth: number
-): Query {
-    let query: Query = sourceDb.collection(collectionPath);
-    if (depth === 0 && config.where.length > 0) {
-        for (const filter of config.where) {
-            query = query.where(filter.field, filter.operator, filter.value);
-        }
-    }
-    return query;
 }
 
 async function countWithSubcollections(

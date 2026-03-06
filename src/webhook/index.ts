@@ -109,7 +109,7 @@ export async function sendWebhook(
     webhookUrl: string,
     payload: WebhookPayload,
     output: Output
-): Promise<void> {
+): Promise<boolean> {
     const webhookType = detectWebhookType(webhookUrl);
 
     let body: Record<string, unknown>;
@@ -162,11 +162,12 @@ export async function sendWebhook(
                     `⚠️  Webhook server error (HTTP ${statusCode}): The webhook service may be temporarily unavailable`
                 );
             }
-            return;
+            return false;
         }
 
         output.logInfo(`Webhook sent successfully (${webhookType})`, { url: webhookUrl });
         output.info(`📤 Webhook notification sent (${webhookType})`);
+        return true;
     } catch (error) {
         const err = error as Error;
 
@@ -182,5 +183,6 @@ export async function sendWebhook(
             output.logError(`Failed to send webhook: ${err.message}`, { url: webhookUrl });
             output.warn(`⚠️  Failed to send webhook: ${err.message}`);
         }
+        return false;
     }
 }

@@ -1,14 +1,18 @@
-import type { Firestore, WriteBatch, Query, QueryDocumentSnapshot } from 'firebase-admin/firestore';
+import type { Firestore, WriteBatch, QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import type { Config, Stats, TransformFunction, ConflictInfo } from '../types.js';
 import type { Output } from '../utils/output.js';
 import type { RateLimiter } from '../utils/rate-limiter.js';
 import type { ProgressBarWrapper } from '../utils/progress.js';
 import type { StateSaver } from '../state/index.js';
 import { withRetry } from '../utils/retry.js';
-import { matchesExcludePattern } from '../utils/patterns.js';
 import { estimateDocumentSize, formatBytes, FIRESTORE_MAX_DOC_SIZE } from '../utils/doc-size.js';
 import { hashDocumentData, compareHashes } from '../utils/integrity.js';
-import { getSubcollections, getDestCollectionPath, getDestDocId } from './helpers.js';
+import {
+    getDestCollectionPath,
+    getDestDocId,
+    getFilteredSubcollections,
+    buildQueryWithFilters,
+} from './helpers.js';
 
 export interface TransferContext {
     sourceDb: Firestore;
@@ -33,8 +37,8 @@ interface DocProcessResult {
 type UpdateTimeMap = Map<string, string | null>;
 
 /**
- * Capture updateTime of destination documents before processing.
- * Returns a map of docId -> updateTime (ISO string, or null if doc doesn't exist).
+ * Capture updateTime of destination documents and detect conflicts in a single API call.
+ * Captures initial state, then after writing, compares with a second call.
  */
 async function captureDestUpdateTimes(
     destDb: Firestore,
@@ -43,7 +47,6 @@ async function captureDestUpdateTimes(
 ): Promise<UpdateTimeMap> {
     const updateTimes: UpdateTimeMap = new Map();
 
-    // Batch get dest docs to get their updateTime
     const docRefs = destDocIds.map((id) => destDb.collection(destCollectionPath).doc(id));
     const docs = await destDb.getAll(...docRefs);
 
@@ -62,32 +65,25 @@ async function captureDestUpdateTimes(
 }
 
 /**
- * Check for conflicts by comparing current updateTimes with captured ones.
- * Returns array of docIds that have conflicts.
+ * Detect conflicts by comparing current dest state with previously captured times.
+ * Uses local comparison against the already-fetched captured times (no additional API call).
  */
-async function checkForConflicts(
-    destDb: Firestore,
-    destCollectionPath: string,
-    destDocIds: string[],
-    capturedTimes: UpdateTimeMap
-): Promise<string[]> {
+function detectConflicts(
+    capturedTimes: UpdateTimeMap,
+    currentDocs: FirebaseFirestore.DocumentSnapshot[],
+    destDocIds: string[]
+): string[] {
     const conflicts: string[] = [];
 
-    const docRefs = destDocIds.map((id) => destDb.collection(destCollectionPath).doc(id));
-    const docs = await destDb.getAll(...docRefs);
-
-    for (let i = 0; i < docs.length; i++) {
-        const doc = docs[i];
+    for (let i = 0; i < currentDocs.length; i++) {
+        const doc = currentDocs[i];
         const docId = destDocIds[i];
         const capturedTime = capturedTimes.get(docId);
 
         const currentTime =
             doc.exists && doc.updateTime ? doc.updateTime.toDate().toISOString() : null;
 
-        // Conflict conditions:
-        // 1. Doc didn't exist before but now exists (created by someone else)
-        // 2. Doc was modified (updateTime changed)
-        // 3. Doc was deleted during transfer (existed before, doesn't now)
+        // Conflict: doc state changed between capture and now
         const isConflict =
             (doc.exists && capturedTime === null) ||
             (doc.exists && currentTime !== capturedTime) ||
@@ -99,24 +95,6 @@ async function checkForConflicts(
     }
 
     return conflicts;
-}
-
-function buildBaseQuery(
-    sourceDb: Firestore,
-    collectionPath: string,
-    config: Config,
-    depth: number
-): Query {
-    let query: Query = sourceDb.collection(collectionPath);
-
-    if (depth === 0 && config.where.length > 0) {
-        for (const filter of config.where) {
-            query = query.where(filter.field, filter.operator, filter.value);
-        }
-    }
-
-    // Limit is handled via pagination in transferCollection
-    return query;
 }
 
 function applyTransform(
@@ -212,14 +190,9 @@ async function processSubcollections(
         return;
     }
 
-    const subcollections = await getSubcollections(doc.ref);
+    const subcollections = await getFilteredSubcollections(doc.ref, config.exclude);
 
     for (const subcollectionId of subcollections) {
-        if (matchesExcludePattern(subcollectionId, config.exclude)) {
-            output.logInfo(`Skipping excluded subcollection: ${subcollectionId}`);
-            continue;
-        }
-
         const subcollectionPath = `${collectionPath}/${doc.id}/${subcollectionId}`;
         const subCtx = { ...ctx, config: { ...config, limit: 0, where: [] } };
         await transferCollection(subCtx, subcollectionPath, depth + 1);
@@ -292,12 +265,31 @@ async function commitBatchWithRetry(
         await rateLimiter.acquire(batchDocIds.length);
     }
 
-    await withRetry(() => destBatch.commit(), {
-        retries: config.retries,
-        onRetry: (attempt, max, err, delay) => {
-            output.logError(`Retry commit ${attempt}/${max}`, { error: err.message, delay });
-        },
-    });
+    try {
+        await withRetry(() => destBatch.commit(), {
+            retries: config.retries,
+            onRetry: (attempt, max, err, delay) => {
+                output.logError(`Retry commit ${attempt}/${max}`, { error: err.message, delay });
+            },
+        });
+    } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        stats.errors += batchDocIds.length;
+        output.logError(
+            `Batch commit failed for ${batchDocIds.length} documents after ${config.retries} retries`,
+            {
+                collection: collectionPath,
+                error: err.message,
+                docIds: batchDocIds.slice(0, 10),
+            }
+        );
+        output.warn(
+            `⚠️  Batch commit failed: ${batchDocIds.length} documents in ${collectionPath} were NOT written (${err.message})`
+        );
+        // Re-decrement documentsTransferred since they weren't actually committed
+        stats.documentsTransferred -= batchDocIds.length;
+        return;
+    }
 
     if (stateSaver && batchDocIds.length > 0) {
         stateSaver.markBatchCompleted(collectionPath, batchDocIds, stats);
@@ -476,19 +468,17 @@ async function processBatch(
         return [];
     }
 
-    // Step 2: If conflict detection is enabled, capture dest updateTimes and check for conflicts
+    // Step 2: If conflict detection is enabled, capture dest updateTimes before writing
     let docsToWrite = preparedDocs;
+    let capturedTimes: UpdateTimeMap | null = null;
     if (config.detectConflicts && !config.dryRun) {
         const destDocIds = preparedDocs.map((p) => p.destDocId);
-        const capturedTimes = await captureDestUpdateTimes(destDb, destCollectionPath, destDocIds);
+        capturedTimes = await captureDestUpdateTimes(destDb, destCollectionPath, destDocIds);
 
-        // Check for conflicts
-        const conflictingIds = await checkForConflicts(
-            destDb,
-            destCollectionPath,
-            destDocIds,
-            capturedTimes
-        );
+        // Check for pre-existing conflicts (docs modified between count and transfer start)
+        const docRefs = destDocIds.map((id) => destDb.collection(destCollectionPath).doc(id));
+        const currentDocs = await destDb.getAll(...docRefs);
+        const conflictingIds = detectConflicts(capturedTimes, currentDocs, destDocIds);
 
         if (conflictingIds.length > 0) {
             const conflictSet = new Set(conflictingIds);
@@ -530,7 +520,7 @@ export async function transferCollection(
     const { sourceDb, config, stats, output } = ctx;
     const destCollectionPath = getDestCollectionPath(collectionPath, config.renameCollection);
 
-    const baseQuery = buildBaseQuery(sourceDb, collectionPath, config, depth);
+    const baseQuery = buildQueryWithFilters(sourceDb, collectionPath, config, depth);
     const userLimit = config.limit > 0 && depth === 0 ? config.limit : 0;
 
     let totalProcessed = 0;

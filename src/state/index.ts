@@ -192,18 +192,33 @@ export function loadTransferState(stateFile: string): TransferState | null {
             return null;
         }
         const content = fs.readFileSync(stateFile, 'utf-8');
-        const state = JSON.parse(content) as TransferState;
+
+        let state: TransferState;
+        try {
+            state = JSON.parse(content) as TransferState;
+        } catch {
+            console.error(`⚠️  State file is corrupted (invalid JSON): ${stateFile}`);
+            console.error('   Delete the file and restart, or run without --resume.');
+            return null;
+        }
+
+        if (!state.version) {
+            console.error(`⚠️  State file is missing version field: ${stateFile}`);
+            console.error('   The file may be corrupted. Delete it and restart.');
+            return null;
+        }
 
         if (state.version !== STATE_VERSION) {
             console.warn(
                 `⚠️  State file version mismatch (expected ${STATE_VERSION}, got ${state.version})`
             );
+            console.warn('   Delete the file and restart to use the current format.');
             return null;
         }
 
         return state;
     } catch (error) {
-        console.error(`⚠️  Failed to load state file: ${(error as Error).message}`);
+        console.error(`⚠️  Failed to read state file: ${(error as Error).message}`);
         return null;
     }
 }

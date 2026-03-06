@@ -96,7 +96,7 @@ async function discoverCollections(
 ): Promise<{ app: admin.app.App; db: Firestore; collections: CollectionInfo[] }> {
     console.log('\nConnecting to source project...');
 
-    let tempSourceApp: admin.app.App;
+    let tempSourceApp: admin.app.App | undefined;
     let sourceDb: Firestore;
     let rootCollections: FirebaseFirestore.CollectionReference[];
 
@@ -111,6 +111,11 @@ async function discoverCollections(
         sourceDb = tempSourceApp.firestore();
         rootCollections = await sourceDb.listCollections();
     } catch (error) {
+        // Clean up Firebase app if it was initialized before the error
+        if (tempSourceApp) {
+            await tempSourceApp.delete().catch(() => {});
+        }
+
         const err = error as Error & { code?: string };
         console.error('\nCannot connect to Firebase project:', err.message);
 
