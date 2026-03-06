@@ -97,7 +97,7 @@ export interface CliArgs {
     yes: boolean;
     log?: string;
     maxLogSize?: string;
-    retries: number;
+    retries?: number;
     quiet: boolean;
     where?: string[];
     exclude?: string[];

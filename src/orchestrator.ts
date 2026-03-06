@@ -265,6 +265,24 @@ async function validateTransformWithSamples(
     output.blank();
 }
 
+function canWriteProgress(output: Output): boolean {
+    return !output.isQuiet && !output.isJson && process.stdout.isTTY === true;
+}
+
+function clearLine(): void {
+    if (!process.stdout.isTTY) return;
+    const width = typeof process.stdout.columns === 'number' && process.stdout.columns > 0
+        ? process.stdout.columns
+        : SEPARATOR_LENGTH;
+    process.stdout.write('\r' + ' '.repeat(width) + '\r');
+}
+
+function formatNameList(names: Set<string>, max: number = 8): string {
+    const arr = [...names];
+    if (arr.length <= max) return arr.join(', ');
+    return arr.slice(0, max).join(', ') + `, ... (+${arr.length - max})`;
+}
+
 async function setupProgressTracking(
     sourceDb: Firestore,
     config: Config,
@@ -276,34 +294,66 @@ async function setupProgressTracking(
 
     if (!output.isQuiet) {
         output.info('📊 Counting documents...');
-        let lastSubcollectionLog = Date.now();
-        let subcollectionCount = 0;
-
-        const countProgress: CountProgress = {
-            onCollection: (path, count) => {
-                output.info(`   ${path}: ${count} documents`);
-            },
-            onSubcollection: (_path) => {
-                subcollectionCount++;
-                const now = Date.now();
-                if (now - lastSubcollectionLog > PROGRESS_LOG_INTERVAL_MS) {
-                    process.stdout.write(`\r   Scanning subcollections... (${subcollectionCount} found)`);
-                    lastSubcollectionLog = now;
-                }
-            },
-        };
 
         for (const collection of config.collections) {
-            totalDocs += await countDocuments(sourceDb, collection, config, 0, countProgress);
+            let rootCount = 0;
+            let subcollectionInstances = 0;
+            const subcollectionNames = new Set<string>();
+            const excludedNames = new Set<string>();
+            let lastLog = Date.now();
+            let showedScanLine = false;
+
+            if (canWriteProgress(output)) {
+                process.stdout.write(`   Counting ${collection}...`);
+                showedScanLine = true;
+            }
+
+            const countProgress: CountProgress = {
+                onCollection: (_path, count) => {
+                    rootCount = count;
+                },
+                onSubcollection: (path) => {
+                    subcollectionInstances++;
+                    const segments = path.split('/');
+                    subcollectionNames.add(segments[segments.length - 1]);
+
+                    if (!canWriteProgress(output)) return;
+                    const now = Date.now();
+                    if (now - lastLog > PROGRESS_LOG_INTERVAL_MS) {
+                        process.stdout.write(`\r   Scanning ${collection}... (${subcollectionInstances} subcollections found)`);
+                        showedScanLine = true;
+                        lastLog = now;
+                    }
+                },
+                onSubcollectionExcluded: (name) => {
+                    excludedNames.add(name);
+                },
+            };
+
+            const collectionTotal = await countDocuments(sourceDb, collection, config, 0, countProgress);
+            totalDocs += collectionTotal;
+
+            // Clear live indicator line
+            if (showedScanLine && canWriteProgress(output)) {
+                clearLine();
+            }
+
+            // Print collection summary
+            output.info(`   ${collection}: ${rootCount} documents`);
+
+            if (subcollectionInstances > 0) {
+                const subDocs = collectionTotal - rootCount;
+                output.info(`      + ${subDocs} in subcollections (${formatNameList(subcollectionNames)})`);
+            }
+            if (excludedNames.size > 0) {
+                output.info(`      Excluded: ${formatNameList(excludedNames)}`);
+            }
         }
 
-        if (subcollectionCount > 0) {
-            process.stdout.write('\r' + ' '.repeat(SEPARATOR_LENGTH) + '\r');
-            output.info(`   Subcollections scanned: ${subcollectionCount}`);
+        output.info(`\n   Total: ${totalDocs} documents to transfer\n`);
+        if (canWriteProgress(output)) {
+            progressBar.start(totalDocs, stats);
         }
-        output.info(`   Total: ${totalDocs} documents to transfer\n`);
-
-        progressBar.start(totalDocs, stats);
     }
 
     return { totalDocs, progressBar };
@@ -376,14 +426,17 @@ async function deleteOrphanDocs(
     let lastProgressLog = Date.now();
     let subcollectionCount = 0;
 
+    const showProgress = canWriteProgress(output);
+
     const progress: DeleteOrphansProgress = {
         onScanStart: (collection) => {
-            process.stdout.write(`   Scanning ${collection}...`);
+            if (showProgress) process.stdout.write(`   Scanning ${collection}...`);
         },
         onScanComplete: (collection, orphanCount, totalDest) => {
-            process.stdout.write(`\r   ${collection}: ${orphanCount}/${totalDest} orphan docs\n`);
+            if (showProgress) process.stdout.write(`\r   ${collection}: ${orphanCount}/${totalDest} orphan docs\n`);
         },
         onBatchDeleted: (collection, deletedSoFar, total) => {
+            if (!showProgress) return;
             process.stdout.write(`\r   Deleting from ${collection}... ${deletedSoFar}/${total}`);
             if (deletedSoFar === total) {
                 process.stdout.write('\n');
@@ -391,6 +444,7 @@ async function deleteOrphanDocs(
         },
         onSubcollectionScan: (_path) => {
             subcollectionCount++;
+            if (!showProgress) return;
             const now = Date.now();
             if (now - lastProgressLog > PROGRESS_LOG_INTERVAL_MS) {
                 process.stdout.write(`\r   Scanning subcollections... (${subcollectionCount} checked)`);
@@ -411,8 +465,8 @@ async function deleteOrphanDocs(
         stats.documentsDeleted += deleted;
     }
 
-    if (subcollectionCount > 0) {
-        process.stdout.write('\r' + ' '.repeat(SEPARATOR_LENGTH) + '\r');
+    if (subcollectionCount > 0 && showProgress) {
+        clearLine();
     }
 
     if (stats.documentsDeleted > 0) {

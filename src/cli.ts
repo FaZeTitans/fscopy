@@ -89,7 +89,6 @@ const argv = yargs(hideBin(process.argv))
     .option('retries', {
         type: 'number',
         description: 'Number of retries on error (default: 3)',
-        default: 3,
     })
     .option('quiet', {
         alias: 'q',
@@ -166,17 +165,14 @@ const argv = yargs(hideBin(process.argv))
     .option('verify', {
         type: 'boolean',
         description: 'Verify document counts after transfer',
-        default: false,
     })
     .option('rate-limit', {
         type: 'number',
         description: 'Limit transfer rate (documents per second, 0 = unlimited)',
-        default: 0,
     })
     .option('skip-oversized', {
         type: 'boolean',
         description: 'Skip documents exceeding 1MB instead of failing',
-        default: false,
     })
     .option('json', {
         type: 'boolean',
@@ -191,17 +187,14 @@ const argv = yargs(hideBin(process.argv))
     .option('detect-conflicts', {
         type: 'boolean',
         description: 'Detect if destination docs were modified during transfer',
-        default: false,
     })
     .option('max-depth', {
         type: 'number',
         description: 'Max subcollection depth (0 = unlimited)',
-        default: 0,
     })
     .option('verify-integrity', {
         type: 'boolean',
         description: 'Verify document integrity with hash after transfer',
-        default: false,
     })
     .option('validate-only', {
         type: 'boolean',
@@ -250,7 +243,11 @@ async function main(): Promise<void> {
 
     // Run interactive mode if enabled
     if (argv.interactive) {
-        config = await runInteractiveMode(config);
+        const result = await runInteractiveMode(config);
+        config = result.config;
+        if (result.action === 'save') {
+            process.exit(0);
+        }
     }
 
     displayConfig(config);

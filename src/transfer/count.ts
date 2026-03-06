@@ -6,6 +6,7 @@ import { getSubcollections } from './helpers.js';
 export interface CountProgress {
     onCollection?: (path: string, count: number) => void;
     onSubcollection?: (path: string) => void;
+    onSubcollectionExcluded?: (name: string) => void;
 }
 
 function buildQueryWithFilters(
@@ -65,11 +66,19 @@ async function countSubcollectionsForDoc(
     depth: number,
     progress?: CountProgress
 ): Promise<number> {
+    // Respect maxDepth to match transfer behavior
+    if (config.maxDepth > 0 && depth >= config.maxDepth) return 0;
+
     let count = 0;
     const subcollections = await getSubcollections(doc.ref);
 
     for (const subId of subcollections) {
-        if (matchesExcludePattern(subId, config.exclude)) continue;
+        if (matchesExcludePattern(subId, config.exclude)) {
+            if (progress?.onSubcollectionExcluded) {
+                progress.onSubcollectionExcluded(subId);
+            }
+            continue;
+        }
 
         const subPath = `${collectionPath}/${doc.id}/${subId}`;
         if (progress?.onSubcollection) {
