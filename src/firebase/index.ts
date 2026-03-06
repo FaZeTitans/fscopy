@@ -12,22 +12,17 @@ export interface FirebaseConnections {
     destDb: Firestore;
 }
 
-export function initializeFirebase(config: Config): FirebaseConnections {
-    sourceApp = admin.initializeApp(
-        {
-            credential: admin.credential.applicationDefault(),
-            projectId: config.sourceProject!,
-        },
-        'source'
-    );
+function getAppOptions(projectId: string): admin.AppOptions {
+    const isEmulator = !!process.env.FIRESTORE_EMULATOR_HOST;
+    return {
+        projectId,
+        ...(isEmulator ? {} : { credential: admin.credential.applicationDefault() }),
+    };
+}
 
-    destApp = admin.initializeApp(
-        {
-            credential: admin.credential.applicationDefault(),
-            projectId: config.destProject!,
-        },
-        'dest'
-    );
+export function initializeFirebase(config: Config): FirebaseConnections {
+    sourceApp = admin.initializeApp(getAppOptions(config.sourceProject!), 'source');
+    destApp = admin.initializeApp(getAppOptions(config.destProject!), 'dest');
 
     return {
         sourceDb: sourceApp.firestore(),

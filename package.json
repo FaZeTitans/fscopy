@@ -9,9 +9,12 @@
     "scripts": {
         "start": "bun src/cli.ts",
         "dev": "bun --watch src/cli.ts",
-        "test": "bun test",
+        "test": "bun test src/__tests__/*.test.ts",
+        "test:integration": "FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 FSCOPY_SKIP_CREDENTIALS_CHECK=1 bun test src/__tests__/integration/",
+        "test:all": "bun run test && bun run test:integration",
         "test:watch": "bun test --watch",
         "test:coverage": "bun test --coverage",
+        "emulator": "firebase emulators:start --only firestore --project fscopy-test",
         "type-check": "tsc --noEmit",
         "lint": "eslint src/**/*.ts --no-warn-ignored",
         "lint:fix": "eslint src/**/*.ts --no-warn-ignored --fix",
@@ -72,6 +75,7 @@
         "eslint": "^9.39.2",
         "prettier": "^3.7.4",
         "typescript": "^5.9.3",
+        "firebase-tools": "^13.29.1",
         "typescript-eslint": "^8.51.0"
     }
 }
