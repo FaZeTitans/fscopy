@@ -66,6 +66,12 @@ export function parseStringList(value: string | undefined): string[] {
         .filter((s) => s.length > 0);
 }
 
+export function parseIntOption(value: string | undefined): number | undefined {
+    if (value === undefined || value === '') return undefined;
+    const parsed = Number.parseInt(value, 10);
+    return Number.isNaN(parsed) ? undefined : parsed;
+}
+
 export function parseRenameMapping(
     mappings: string[] | string | undefined
 ): Record<string, string> {
@@ -156,11 +162,11 @@ export function parseIniConfig(content: string): Partial<Config> {
         idPrefix: parsed.options?.idPrefix ?? null,
         idSuffix: parsed.options?.idSuffix ?? null,
         webhook: parsed.options?.webhook ?? null,
-        retries: Number.parseInt(parsed.options?.retries ?? '', 10) || undefined,
-        rateLimit: Number.parseInt(parsed.options?.rateLimit ?? '', 10) || undefined,
+        retries: parseIntOption(parsed.options?.retries),
+        rateLimit: parseIntOption(parsed.options?.rateLimit),
         skipOversized: parsed.options?.skipOversized !== undefined ? parseBoolean(parsed.options.skipOversized) : undefined,
         detectConflicts: parsed.options?.detectConflicts !== undefined ? parseBoolean(parsed.options.detectConflicts) : undefined,
-        maxDepth: Number.parseInt(parsed.options?.maxDepth ?? '', 10) || undefined,
+        maxDepth: parseIntOption(parsed.options?.maxDepth),
         verify: parsed.options?.verify !== undefined ? parseBoolean(parsed.options.verify) : undefined,
         verifyIntegrity: parsed.options?.verifyIntegrity !== undefined ? parseBoolean(parsed.options.verifyIntegrity) : undefined,
     };
