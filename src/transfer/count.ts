@@ -1,7 +1,8 @@
-import type { Firestore, Query } from 'firebase-admin/firestore';
+import type { Firestore, Query, QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import type { Config } from '../types.js';
 import { matchesExcludePattern } from '../utils/patterns.js';
 import { getSubcollections, buildQueryWithFilters } from './helpers.js';
+import { CLEAR_PAGE_SIZE } from '../constants.js';
 
 export interface CountProgress {
     onCollection?: (path: string, count: number) => void;
@@ -17,27 +18,49 @@ async function countWithSubcollections(
     depth: number,
     progress?: CountProgress
 ): Promise<number> {
-    // Apply limit at root level only
-    if (depth === 0 && config.limit > 0) {
-        query = query.limit(config.limit);
+    const userLimit = depth === 0 && config.limit > 0 ? config.limit : 0;
+    let count = 0;
+    let lastDoc: QueryDocumentSnapshot | undefined;
+
+    while (true) {
+        let pageSize = CLEAR_PAGE_SIZE;
+        if (userLimit > 0) {
+            const remaining = userLimit - count;
+            if (remaining <= 0) break;
+            pageSize = Math.min(pageSize, remaining);
+        }
+
+        let pageQuery = query.select().limit(pageSize);
+        if (lastDoc) {
+            pageQuery = pageQuery.startAfter(lastDoc);
+        }
+
+        const snapshot = await pageQuery.get();
+        if (snapshot.empty) break;
+
+        count += snapshot.size;
+
+        if (depth === 0 && progress?.onCollection) {
+            progress.onCollection(collectionPath, count);
+        }
+
+        for (const doc of snapshot.docs) {
+            count += await countSubcollectionsForDoc(
+                sourceDb,
+                doc,
+                collectionPath,
+                config,
+                depth,
+                progress
+            );
+        }
+
+        lastDoc = snapshot.docs[snapshot.docs.length - 1];
+        if (snapshot.size < pageSize) break;
     }
 
-    const snapshot = await query.select().get();
-    let count = snapshot.size;
-
-    if (depth === 0 && progress?.onCollection) {
-        progress.onCollection(collectionPath, snapshot.size);
-    }
-
-    for (const doc of snapshot.docs) {
-        count += await countSubcollectionsForDoc(
-            sourceDb,
-            doc,
-            collectionPath,
-            config,
-            depth,
-            progress
-        );
+    if (count === 0 && depth === 0 && progress?.onCollection) {
+        progress.onCollection(collectionPath, 0);
     }
 
     return count;

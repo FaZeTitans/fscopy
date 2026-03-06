@@ -323,22 +323,3 @@ export function validateStateForResume(state: TransferState, config: Config): Re
     return { errors, warnings };
 }
 
-export function isDocCompleted(
-    state: TransferState,
-    collectionPath: string,
-    docId: string
-): boolean {
-    const completedInCollection = state.completedDocs[collectionPath];
-    return completedInCollection ? completedInCollection.includes(docId) : false;
-}
-
-export function markDocCompleted(
-    state: TransferState,
-    collectionPath: string,
-    docId: string
-): void {
-    if (!state.completedDocs[collectionPath]) {
-        state.completedDocs[collectionPath] = [];
-    }
-    state.completedDocs[collectionPath].push(docId);
-}

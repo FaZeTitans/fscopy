@@ -8,8 +8,6 @@ import {
     deleteTransferState,
     createInitialState,
     validateStateForResume,
-    isDocCompleted,
-    markDocCompleted,
     STATE_VERSION,
     StateSaver,
     CompletedDocsCache,
@@ -294,124 +292,6 @@ describe('State Management', () => {
             expect(warnings).toHaveLength(1);
             expect(warnings[0]).toContain('removed_collection');
             expect(warnings[0]).toContain('ignored');
-        });
-    });
-
-    describe('isDocCompleted', () => {
-        test('returns false for empty completedDocs', () => {
-            const state: TransferState = {
-                version: STATE_VERSION,
-                sourceProject: '',
-                destProject: '',
-                collections: [],
-                startedAt: '',
-                updatedAt: '',
-                completedDocs: {},
-                stats: {
-                    collectionsProcessed: 0,
-                    documentsTransferred: 0,
-                    documentsDeleted: 0,
-                    errors: 0,
-                    conflicts: 0,
-                    integrityErrors: 0,
-                },
-            };
-
-            expect(isDocCompleted(state, 'users', 'doc1')).toBe(false);
-        });
-
-        test('returns false for doc not in collection', () => {
-            const state: TransferState = {
-                version: STATE_VERSION,
-                sourceProject: '',
-                destProject: '',
-                collections: [],
-                startedAt: '',
-                updatedAt: '',
-                completedDocs: { users: ['doc1', 'doc2'] },
-                stats: {
-                    collectionsProcessed: 0,
-                    documentsTransferred: 0,
-                    documentsDeleted: 0,
-                    errors: 0,
-                    conflicts: 0,
-                    integrityErrors: 0,
-                },
-            };
-
-            expect(isDocCompleted(state, 'users', 'doc3')).toBe(false);
-        });
-
-        test('returns true for completed doc', () => {
-            const state: TransferState = {
-                version: STATE_VERSION,
-                sourceProject: '',
-                destProject: '',
-                collections: [],
-                startedAt: '',
-                updatedAt: '',
-                completedDocs: { users: ['doc1', 'doc2'] },
-                stats: {
-                    collectionsProcessed: 0,
-                    documentsTransferred: 0,
-                    documentsDeleted: 0,
-                    errors: 0,
-                    conflicts: 0,
-                    integrityErrors: 0,
-                },
-            };
-
-            expect(isDocCompleted(state, 'users', 'doc1')).toBe(true);
-        });
-    });
-
-    describe('markDocCompleted', () => {
-        test('creates collection array if not exists', () => {
-            const state: TransferState = {
-                version: STATE_VERSION,
-                sourceProject: '',
-                destProject: '',
-                collections: [],
-                startedAt: '',
-                updatedAt: '',
-                completedDocs: {},
-                stats: {
-                    collectionsProcessed: 0,
-                    documentsTransferred: 0,
-                    documentsDeleted: 0,
-                    errors: 0,
-                    conflicts: 0,
-                    integrityErrors: 0,
-                },
-            };
-
-            markDocCompleted(state, 'users', 'doc1');
-
-            expect(state.completedDocs.users).toEqual(['doc1']);
-        });
-
-        test('appends to existing collection array', () => {
-            const state: TransferState = {
-                version: STATE_VERSION,
-                sourceProject: '',
-                destProject: '',
-                collections: [],
-                startedAt: '',
-                updatedAt: '',
-                completedDocs: { users: ['doc1'] },
-                stats: {
-                    collectionsProcessed: 0,
-                    documentsTransferred: 0,
-                    documentsDeleted: 0,
-                    errors: 0,
-                    conflicts: 0,
-                    integrityErrors: 0,
-                },
-            };
-
-            markDocCompleted(state, 'users', 'doc2');
-
-            expect(state.completedDocs.users).toEqual(['doc1', 'doc2']);
         });
     });
 

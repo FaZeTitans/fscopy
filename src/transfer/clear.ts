@@ -65,7 +65,7 @@ export async function clearCollection(
 
     // Paginate through the collection to avoid loading all docs into memory
     while (true) {
-        let query = db.collection(collectionPath).limit(pageSize);
+        let query = db.collection(collectionPath).select().limit(pageSize);
         if (lastDoc) {
             query = query.startAfter(lastDoc);
         }
@@ -213,42 +213,79 @@ export async function deleteOrphanDocuments(
 
     progress?.onScanStart?.(destCollectionPath);
 
-    const sourceSnapshot = await sourceDb.collection(sourceCollectionPath).select().get();
-    const sourceIds = new Set(sourceSnapshot.docs.map((doc) => doc.id));
-
-    const destSnapshot = await destDb.collection(destCollectionPath).select().get();
-    const orphanDocs = destSnapshot.docs.filter((doc) => !sourceIds.has(doc.id));
-
-    progress?.onScanComplete?.(destCollectionPath, orphanDocs.length, destSnapshot.size);
-
-    let deletedCount = 0;
-
-    if (orphanDocs.length > 0) {
-        output.logInfo(`Found ${orphanDocs.length} orphan documents in ${destCollectionPath}`);
-
-        for (let i = 0; i < orphanDocs.length; i += config.batchSize) {
-            const batch = orphanDocs.slice(i, i + config.batchSize);
-            deletedCount += await deleteOrphanBatch(
-                destDb,
-                batch,
-                destCollectionPath,
-                config,
-                output
-            );
-            progress?.onBatchDeleted?.(destCollectionPath, deletedCount, orphanDocs.length);
-        }
+    // Paginate source to build ID set (strings only, minimal memory)
+    const sourceIds = new Set<string>();
+    let lastSourceDoc: QueryDocumentSnapshot | undefined;
+    while (true) {
+        let query = sourceDb.collection(sourceCollectionPath).select().limit(CLEAR_PAGE_SIZE);
+        if (lastSourceDoc) query = query.startAfter(lastSourceDoc);
+        const snapshot = await query.get();
+        if (snapshot.empty) break;
+        for (const doc of snapshot.docs) sourceIds.add(doc.id);
+        lastSourceDoc = snapshot.docs[snapshot.docs.length - 1];
+        if (snapshot.size < CLEAR_PAGE_SIZE) break;
     }
 
+    // Paginate dest and find/delete orphans in batches
+    let deletedCount = 0;
+    let totalDest = 0;
+    let totalOrphans = 0;
+    let lastDestDoc: QueryDocumentSnapshot | undefined;
+
+    while (true) {
+        let query = destDb.collection(destCollectionPath).select().limit(CLEAR_PAGE_SIZE);
+        if (lastDestDoc) query = query.startAfter(lastDestDoc);
+        const snapshot = await query.get();
+        if (snapshot.empty) break;
+
+        totalDest += snapshot.size;
+        const orphanDocs = snapshot.docs.filter((doc) => !sourceIds.has(doc.id));
+        totalOrphans += orphanDocs.length;
+
+        if (orphanDocs.length > 0) {
+            output.logInfo(`Found ${orphanDocs.length} orphan documents in ${destCollectionPath}`);
+
+            for (let i = 0; i < orphanDocs.length; i += config.batchSize) {
+                const batch = orphanDocs.slice(i, i + config.batchSize);
+                deletedCount += await deleteOrphanBatch(
+                    destDb,
+                    batch,
+                    destCollectionPath,
+                    config,
+                    output
+                );
+                progress?.onBatchDeleted?.(destCollectionPath, deletedCount, totalOrphans);
+            }
+        }
+
+        lastDestDoc = snapshot.docs[snapshot.docs.length - 1];
+        if (snapshot.size < CLEAR_PAGE_SIZE) break;
+    }
+
+    progress?.onScanComplete?.(destCollectionPath, totalOrphans, totalDest);
+
+    // Process subcollection orphans (paginate source docs)
     if (config.includeSubcollections) {
-        deletedCount += await processSubcollectionOrphansWithProgress(
-            sourceDb,
-            destDb,
-            sourceSnapshot,
-            sourceCollectionPath,
-            config,
-            output,
-            progress
-        );
+        let lastSubDoc: QueryDocumentSnapshot | undefined;
+        while (true) {
+            let query = sourceDb.collection(sourceCollectionPath).select().limit(CLEAR_PAGE_SIZE);
+            if (lastSubDoc) query = query.startAfter(lastSubDoc);
+            const snapshot = await query.get();
+            if (snapshot.empty) break;
+
+            deletedCount += await processSubcollectionOrphansWithProgress(
+                sourceDb,
+                destDb,
+                snapshot,
+                sourceCollectionPath,
+                config,
+                output,
+                progress
+            );
+
+            lastSubDoc = snapshot.docs[snapshot.docs.length - 1];
+            if (snapshot.size < CLEAR_PAGE_SIZE) break;
+        }
     }
 
     return deletedCount;

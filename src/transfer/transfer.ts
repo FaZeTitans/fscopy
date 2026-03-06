@@ -1,4 +1,4 @@
-import type { Firestore, WriteBatch, QueryDocumentSnapshot } from 'firebase-admin/firestore';
+import { FieldPath, type Firestore, type WriteBatch, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import type { Config, Stats, TransformFunction, ConflictInfo } from '../types.js';
 import type { Output } from '../utils/output.js';
 import type { RateLimiter } from '../utils/rate-limiter.js';
@@ -25,6 +25,7 @@ export interface TransferContext {
     stateSaver: StateSaver | null;
     rateLimiter: RateLimiter | null;
     conflictList: ConflictInfo[];
+    maxDepthWarningsShown: Set<string>;
 }
 
 interface DocProcessResult {
@@ -33,69 +34,6 @@ interface DocProcessResult {
     markCompleted: boolean;
 }
 
-// Map of destDocId -> updateTime (as ISO string for comparison)
-type UpdateTimeMap = Map<string, string | null>;
-
-/**
- * Capture updateTime of destination documents and detect conflicts in a single API call.
- * Captures initial state, then after writing, compares with a second call.
- */
-async function captureDestUpdateTimes(
-    destDb: Firestore,
-    destCollectionPath: string,
-    destDocIds: string[]
-): Promise<UpdateTimeMap> {
-    const updateTimes: UpdateTimeMap = new Map();
-
-    const docRefs = destDocIds.map((id) => destDb.collection(destCollectionPath).doc(id));
-    const docs = await destDb.getAll(...docRefs);
-
-    for (let i = 0; i < docs.length; i++) {
-        const doc = docs[i];
-        const docId = destDocIds[i];
-        if (doc.exists) {
-            const updateTime = doc.updateTime;
-            updateTimes.set(docId, updateTime ? updateTime.toDate().toISOString() : null);
-        } else {
-            updateTimes.set(docId, null);
-        }
-    }
-
-    return updateTimes;
-}
-
-/**
- * Detect conflicts by comparing current dest state with previously captured times.
- * Uses local comparison against the already-fetched captured times (no additional API call).
- */
-function detectConflicts(
-    capturedTimes: UpdateTimeMap,
-    currentDocs: FirebaseFirestore.DocumentSnapshot[],
-    destDocIds: string[]
-): string[] {
-    const conflicts: string[] = [];
-
-    for (let i = 0; i < currentDocs.length; i++) {
-        const doc = currentDocs[i];
-        const docId = destDocIds[i];
-        const capturedTime = capturedTimes.get(docId);
-
-        const currentTime =
-            doc.exists && doc.updateTime ? doc.updateTime.toDate().toISOString() : null;
-
-        // Conflict: doc state changed between capture and now
-        const isConflict =
-            (doc.exists && capturedTime === null) ||
-            (doc.exists && currentTime !== capturedTime) ||
-            (!doc.exists && capturedTime !== null);
-
-        if (isConflict) {
-            conflicts.push(docId);
-        }
-    }
-
-    return conflicts;
-}
 
 function applyTransform(
     docData: Record<string, unknown>,
@@ -162,9 +100,6 @@ function checkDocumentSize(
     );
 }
 
-// Track which collections have already shown the max-depth warning (to avoid spam)
-const maxDepthWarningsShown = new Set<string>();
-
 async function processSubcollections(
     ctx: TransferContext,
     doc: QueryDocumentSnapshot,
@@ -177,8 +112,8 @@ async function processSubcollections(
     if (config.maxDepth > 0 && depth >= config.maxDepth) {
         // Show console warning only once per root collection
         const rootCollection = collectionPath.split('/')[0];
-        if (!maxDepthWarningsShown.has(rootCollection)) {
-            maxDepthWarningsShown.add(rootCollection);
+        if (!ctx.maxDepthWarningsShown.has(rootCollection)) {
+            ctx.maxDepthWarningsShown.add(rootCollection);
             output.warn(
                 `⚠️  Subcollections in ${rootCollection} beyond depth ${config.maxDepth} will be skipped`
             );
@@ -195,6 +130,17 @@ async function processSubcollections(
 
     for (const subcollectionId of subcollections) {
         const subcollectionPath = `${collectionPath}/${doc.id}/${subcollectionId}`;
+
+        // Count subcollection docs with .count() aggregation (1 read instead of N)
+        // and dynamically adjust the progress bar total
+        if (ctx.progressBar.isActive) {
+            const countSnap = await ctx.sourceDb.collection(subcollectionPath).count().get();
+            const subCount = countSnap.data().count;
+            if (subCount > 0) {
+                ctx.progressBar.addToTotal(subCount);
+            }
+        }
+
         const subCtx = { ...ctx, config: { ...config, limit: 0, where: [] } };
         await transferCollection(subCtx, subcollectionPath, depth + 1);
     }
@@ -518,48 +464,50 @@ async function processBatch(
         return [];
     }
 
-    // Step 2: If conflict detection is enabled, capture dest updateTimes before writing
-    let docsToWrite = preparedDocs;
-    let capturedTimes: UpdateTimeMap | null = null;
+    // Step 2: If conflict detection is enabled, check for existing docs in destination
+    // Uses chunked 'in' queries with .select() to minimize reads:
+    // - Firestore 'in' operator supports max 30 values per query
+    // - .select() avoids transferring field data (saves bandwidth)
+    // - Only existing docs cost reads; non-existent docs are free (unlike getAll)
     if (config.detectConflicts && !config.dryRun) {
         const destDocIds = preparedDocs.map((p) => p.destDocId);
-        capturedTimes = await captureDestUpdateTimes(destDb, destCollectionPath, destDocIds);
+        const existingIds = new Set<string>();
+        const FIRESTORE_IN_LIMIT = 30;
 
-        // Check for pre-existing conflicts (docs modified between count and transfer start)
-        const docRefs = destDocIds.map((id) => destDb.collection(destCollectionPath).doc(id));
-        const currentDocs = await destDb.getAll(...docRefs);
-        const conflictingIds = detectConflicts(capturedTimes, currentDocs, destDocIds);
-
-        if (conflictingIds.length > 0) {
-            const conflictSet = new Set(conflictingIds);
-
-            // Filter out conflicting docs
-            docsToWrite = preparedDocs.filter((p) => !conflictSet.has(p.destDocId));
-
-            // Record conflicts
-            for (const prepared of preparedDocs) {
-                if (conflictSet.has(prepared.destDocId)) {
-                    stats.conflicts++;
-                    conflictList.push({
-                        collection: destCollectionPath,
-                        docId: prepared.destDocId,
-                        reason: 'Document was modified during transfer',
-                    });
-                    output.warn(
-                        `⚠️  Conflict detected: ${destCollectionPath}/${prepared.destDocId} was modified during transfer`
-                    );
-                    output.logError('Conflict detected', {
-                        collection: destCollectionPath,
-                        docId: prepared.destDocId,
-                        reason: 'modified_during_transfer',
-                    });
-                }
+        for (let i = 0; i < destDocIds.length; i += FIRESTORE_IN_LIMIT) {
+            const chunk = destDocIds.slice(i, i + FIRESTORE_IN_LIMIT);
+            const snapshot = await destDb
+                .collection(destCollectionPath)
+                .where(FieldPath.documentId(), 'in', chunk)
+                .select()
+                .get();
+            for (const doc of snapshot.docs) {
+                existingIds.add(doc.id);
             }
+        }
+
+        if (existingIds.size > 0) {
+            for (const docId of existingIds) {
+                stats.conflicts++;
+                conflictList.push({
+                    collection: destCollectionPath,
+                    docId,
+                    reason: 'Document already exists in destination',
+                });
+                output.logError('Conflict detected', {
+                    collection: destCollectionPath,
+                    docId,
+                    reason: 'document_exists_in_destination',
+                });
+            }
+            output.warn(
+                `⚠️  ${existingIds.size} document(s) already exist in ${destCollectionPath} and will be overwritten`
+            );
         }
     }
 
-    // Step 3: Commit non-conflicting docs
-    return commitPreparedDocs(docsToWrite, ctx, collectionPath, destCollectionPath, depth);
+    // Step 3: Commit docs
+    return commitPreparedDocs(preparedDocs, ctx, collectionPath, destCollectionPath, depth);
 }
 
 export async function transferCollection(

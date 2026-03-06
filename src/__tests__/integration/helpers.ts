@@ -150,6 +150,7 @@ export function createTestContext(
         stateSaver: null,
         rateLimiter: null,
         conflictList,
+        maxDepthWarningsShown: new Set<string>(),
     };
 }
 

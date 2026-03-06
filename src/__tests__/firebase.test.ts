@@ -90,7 +90,8 @@ function createMockOutput(): Output {
 }
 
 describe('Firebase Module', () => {
-    beforeEach(() => {
+    beforeEach(async () => {
+        await cleanupFirebase();
         mockAdmin.initializeApp.mockClear();
         mockApp.delete.mockClear();
         mockFirestore.listCollections.mockClear();

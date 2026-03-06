@@ -21,6 +21,10 @@ function getAppOptions(projectId: string): admin.AppOptions {
 }
 
 export function initializeFirebase(config: Config): FirebaseConnections {
+    if (sourceApp || destApp) {
+        throw new Error('Firebase already initialized. Call cleanupFirebase() first.');
+    }
+
     sourceApp = admin.initializeApp(getAppOptions(config.sourceProject!), 'source');
     destApp = admin.initializeApp(getAppOptions(config.destProject!), 'dest');
 
