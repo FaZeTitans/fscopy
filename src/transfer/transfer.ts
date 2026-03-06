@@ -1,4 +1,9 @@
-import { FieldPath, type Firestore, type WriteBatch, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
+import {
+    FieldPath,
+    type Firestore,
+    type WriteBatch,
+    type QueryDocumentSnapshot,
+} from 'firebase-admin/firestore';
 import type { Config, Stats, TransformFunction, ConflictInfo } from '../types.js';
 import type { Output } from '../utils/output.js';
 import type { RateLimiter } from '../utils/rate-limiter.js';
@@ -33,7 +38,6 @@ interface DocProcessResult {
     data?: Record<string, unknown>;
     markCompleted: boolean;
 }
-
 
 function applyTransform(
     docData: Record<string, unknown>,

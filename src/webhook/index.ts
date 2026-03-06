@@ -189,7 +189,7 @@ export async function sendWebhook(
             body = formatDiscordPayload(payload);
             break;
         default:
-            body = payload as unknown as Record<string, unknown>;
+            body = { ...payload };
     }
 
     const bodyJson = JSON.stringify(body);
@@ -234,10 +234,7 @@ export async function sendWebhook(
                     );
                     return false;
                 }
-            } else if (
-                err.message.includes('ECONNREFUSED') ||
-                err.message.includes('ENOTFOUND')
-            ) {
+            } else if (err.message.includes('ECONNREFUSED') || err.message.includes('ENOTFOUND')) {
                 output.logError(`Webhook connection failed: ${err.message}`, {
                     url: webhookUrl,
                     attempt: attempt + 1,

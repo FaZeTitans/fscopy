@@ -174,6 +174,8 @@ export async function runTransfer(config: ValidatedConfig, argv: CliArgs, output
     process.on('SIGINT', onSignal);
     process.on('SIGTERM', onSignal);
 
+    let currentStats: Stats = createEmptyStats();
+
     try {
         const { state: transferState, stats } = initializeResumeMode(config, output);
         const transformFn = await loadTransform(config, output);
@@ -186,7 +188,7 @@ export async function runTransfer(config: ValidatedConfig, argv: CliArgs, output
             await validateTransformWithSamples(sourceDb, config, transformFn, output);
         }
 
-        const currentStats = config.resume ? stats : createEmptyStats();
+        currentStats = config.resume ? stats : createEmptyStats();
 
         if (config.clear) {
             await clearDestinationCollections(destDb, config, currentStats, output);
@@ -235,10 +237,10 @@ export async function runTransfer(config: ValidatedConfig, argv: CliArgs, output
         const errorMessage = (error as Error).message;
         const duration = (Date.now() - startTime) / 1000;
 
-        await handleErrorOutput(config, createEmptyStats(), duration, errorMessage, output);
+        await handleErrorOutput(config, currentStats, duration, errorMessage, output);
         await cleanupFirebase();
 
-        return { success: false, stats: createEmptyStats(), duration, error: errorMessage };
+        return { success: false, stats: currentStats, duration, error: errorMessage };
     } finally {
         process.removeListener('SIGINT', onSignal);
         process.removeListener('SIGTERM', onSignal);

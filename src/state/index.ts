@@ -322,4 +322,3 @@ export function validateStateForResume(state: TransferState, config: Config): Re
 
     return { errors, warnings };
 }
-

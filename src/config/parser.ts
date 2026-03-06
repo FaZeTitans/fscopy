@@ -46,13 +46,13 @@ export function parseWhereFilter(filterStr: string): WhereFilter | null {
     const field = fieldPart.trim();
     const rawValue = valuePart.trim();
 
-    let value: string | number | boolean;
+    let value: string | number | boolean | null;
     if (rawValue === 'true') {
         value = true;
     } else if (rawValue === 'false') {
         value = false;
     } else if (rawValue === 'null') {
-        value = null as unknown as string;
+        value = null;
     } else if (!Number.isNaN(Number(rawValue)) && rawValue !== '') {
         value = Number(rawValue);
     } else {

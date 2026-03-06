@@ -103,24 +103,6 @@ export async function clearCollection(
     return deletedCount;
 }
 
-async function clearOrphanSubcollections(
-    destDb: Firestore,
-    doc: QueryDocumentSnapshot,
-    destCollectionPath: string,
-    config: Config,
-    output: Output
-): Promise<number> {
-    let deletedCount = 0;
-    const subcollections = await getFilteredSubcollections(doc.ref, config.exclude);
-
-    for (const subId of subcollections) {
-        const subPath = `${destCollectionPath}/${doc.id}/${subId}`;
-        deletedCount += await clearCollection(destDb, subPath, config, output, true);
-    }
-
-    return deletedCount;
-}
-
 async function deleteOrphanBatch(
     destDb: Firestore,
     batch: QueryDocumentSnapshot[],
@@ -133,7 +115,7 @@ async function deleteOrphanBatch(
 
     for (const doc of batch) {
         if (config.includeSubcollections) {
-            deletedCount += await clearOrphanSubcollections(
+            deletedCount += await clearDocSubcollections(
                 destDb,
                 doc,
                 destCollectionPath,

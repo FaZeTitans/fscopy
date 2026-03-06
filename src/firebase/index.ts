@@ -51,7 +51,8 @@ export async function checkDatabaseConnectivity(
         const errorInfo = formatFirebaseError(err);
         const hint = errorInfo.suggestion ? `\n   Hint: ${errorInfo.suggestion}` : '';
         throw new Error(
-            `Cannot connect to source database (${config.sourceProject}): ${errorInfo.message}${hint}`
+            `Cannot connect to source database (${config.sourceProject}): ${errorInfo.message}${hint}`,
+            { cause: error }
         );
     }
 
@@ -65,7 +66,8 @@ export async function checkDatabaseConnectivity(
             const errorInfo = formatFirebaseError(err);
             const hint = errorInfo.suggestion ? `\n   Hint: ${errorInfo.suggestion}` : '';
             throw new Error(
-                `Cannot connect to destination database (${config.destProject}): ${errorInfo.message}${hint}`
+                `Cannot connect to destination database (${config.destProject}): ${errorInfo.message}${hint}`,
+                { cause: error }
             );
         }
     } else {

@@ -5,7 +5,7 @@
 export interface WhereFilter {
     field: string;
     operator: FirebaseFirestore.WhereFilterOp;
-    value: string | number | boolean;
+    value: string | number | boolean | null;
 }
 
 export interface Config {
